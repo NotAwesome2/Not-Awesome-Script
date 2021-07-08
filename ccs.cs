@@ -21,14 +21,14 @@ using ScriptAction = System.Action;
 
 namespace PluginCCS {
 	
-    public class CmdTempBlock : Command2 {        
-        public override string name { get { return "TempBlock"; } }
-        public override string shortcut { get { return ""; } }
-        public override string type { get { return CommandTypes.Building; } }
-        public override bool museumUsable { get { return true; } }
-        public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+	public class CmdTempBlock : Command2 {		  
+		public override string name { get { return "TempBlock"; } }
+		public override string shortcut { get { return ""; } }
+		public override string type { get { return CommandTypes.Building; } }
+		public override bool museumUsable { get { return true; } }
+		public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
 
-        public override void Use(Player p, string message, CommandData data) {		
+		public override void Use(Player p, string message, CommandData data) {		
 			
 			if (!(p.group.Permission >= LevelPermission.Operator)) {
 				if (!Hacks.CanUseHacks(p)) {
@@ -40,65 +40,65 @@ namespace PluginCCS {
 			}
 			
 			BlockID block = p.GetHeldBlock();
-            int x = p.Pos.BlockX, y = (p.Pos.Y - 32) / 32, z = p.Pos.BlockZ;
+			int x = p.Pos.BlockX, y = (p.Pos.Y - 32) / 32, z = p.Pos.BlockZ;
 
-            try {
-                string[] parts = message.Split(' ');
-                switch (parts.Length) {
-                    case 1:
-                        if (message == "") break;
-                        
-                        if (!CommandParser.GetBlock(p, parts[0], out block)) return;
-                        break;
-                    case 3:
-                        x = int.Parse(parts[0]);
-                        y = int.Parse(parts[1]);
-                        z = int.Parse(parts[2]);
-                        break;
-                    case 4:
-                        if (!CommandParser.GetBlock(p, parts[0], out block)) return;
-                        
-                        x = int.Parse(parts[1]);
-                        y = int.Parse(parts[2]);
-                        z = int.Parse(parts[3]);
-                        break;
-                    default: p.Message("Invalid number of parameters"); return;
-                }
-            } catch { 
-                p.Message("Invalid parameters"); return; 
-            }
+			try {
+				string[] parts = message.Split(' ');
+				switch (parts.Length) {
+					case 1:
+						if (message == "") break;
+						
+						if (!CommandParser.GetBlock(p, parts[0], out block)) return;
+						break;
+					case 3:
+						x = int.Parse(parts[0]);
+						y = int.Parse(parts[1]);
+						z = int.Parse(parts[2]);
+						break;
+					case 4:
+						if (!CommandParser.GetBlock(p, parts[0], out block)) return;
+						
+						x = int.Parse(parts[1]);
+						y = int.Parse(parts[2]);
+						z = int.Parse(parts[3]);
+						break;
+					default: p.Message("Invalid number of parameters"); return;
+				}
+			} catch { 
+				p.Message("Invalid parameters"); return; 
+			}
 
 			if (!CommandParser.IsBlockAllowed(p, "place ", block)) return;
-            
-            x = Clamp(x, p.level.Width);
-            y = Clamp(y, p.level.Height);
-            z = Clamp(z, p.level.Length);
 			
-            p.SendBlockchange( (ushort)x, (ushort)y, (ushort)z, block);
-            //string blockName = Block.GetName(p, block);
-            //Player.Message(p, "{3} block was placed at ({0}, {1}, {2}).", P.X, P.Y, P.Z, blockName);
-        }
+			x = Clamp(x, p.level.Width);
+			y = Clamp(y, p.level.Height);
+			z = Clamp(z, p.level.Length);
+			
+			p.SendBlockchange( (ushort)x, (ushort)y, (ushort)z, block);
+			//string blockName = Block.GetName(p, block);
+			//Player.Message(p, "{3} block was placed at ({0}, {1}, {2}).", P.X, P.Y, P.Z, blockName);
+		}
 		
-        static int Clamp(int value, int axisLen) {
-            if (value < 0) return 0;
-            if (value >= axisLen) return axisLen - 1;
-            return value;
-        }
-        
-        public override void Help(Player p) {
-            p.Message("%T/TempBlock [block] <x> <y> <z>");
-            p.Message("%HPlaces a client-side block at your feet or <x> <y> <z>");
-        }
+		static int Clamp(int value, int axisLen) {
+			if (value < 0) return 0;
+			if (value >= axisLen) return axisLen - 1;
+			return value;
+		}
 		
-    }
-    public class CmdTempChunk : Command2 {        
-        public override string name { get { return "tempchunk"; } }
-        public override string shortcut { get { return "tempc"; } }
-        public override string type { get { return CommandTypes.Building; } }
-        public override bool museumUsable { get { return true; } }
-        public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+		public override void Help(Player p) {
+			p.Message("%T/TempBlock [block] <x> <y> <z>");
+			p.Message("%HPlaces a client-side block at your feet or <x> <y> <z>");
+		}
+		
+	}
+	public class CmdTempChunk : Command2 {		  
+		public override string name { get { return "tempchunk"; } }
+		public override string shortcut { get { return "tempc"; } }
+		public override string type { get { return CommandTypes.Building; } }
+		public override bool museumUsable { get { return true; } }
+		public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
 
-        public override void Use(Player p, string message, CommandData data) {		
+		public override void Use(Player p, string message, CommandData data) {		
 			
 			if (p.group.Permission < LevelPermission.Operator && !Hacks.CanUseHacks(p)) {
 				if (data.Context != CommandContext.MessageBlock) {
@@ -106,7 +106,7 @@ namespace PluginCCS {
 					return;
 				}
 			}
-        	
+			
 			if (message == "") { Help(p); return; }
 			string[] words = message.Split(' ');
 			if (words.Length < 9) {
@@ -143,14 +143,14 @@ namespace PluginCCS {
 				}
 			}
 			
-			//    95, 33, 73, 99, 36, 75, 97, 37, 79
+			//	  95, 33, 73, 99, 36, 75, 97, 37, 79
 			
 			BlockID[] blocks = GetBlocks(p, x1, y1, z1, x2, y2, z2);
 			
 
 			PlaceBlocks(p, blocks, x1, y1, z1, x2, y2, z2, x3, y3, z3, allPlayers);
 			
-        }
+		}
 		
 		public BlockID[] GetBlocks(Player p, int x1, int y1, int z1, int x2, int y2, int z2) {			
 			
@@ -199,14 +199,14 @@ namespace PluginCCS {
 			}
 			
 		}
-        
-        public override void Help(Player p) {
-            p.Message("%T/TempChunk %f[x1 y1 z1] %7[x2 y2 z2] %r[x3 y3 z3] <true/false>");
-            p.Message("%HCopies a chunk of the world defined by %ffirst %Hand %7second%H coords then pastes it into the spot defined by the %rthird %Hset of coords.");
-            p.Message("%HThe last option is optional, and defaults to false. If true, the tempchunk changes are sent to all players in the map.");
-        }
 		
-    }
+		public override void Help(Player p) {
+			p.Message("%T/TempChunk %f[x1 y1 z1] %7[x2 y2 z2] %r[x3 y3 z3] <true/false>");
+			p.Message("%HCopies a chunk of the world defined by %ffirst %Hand %7second%H coords then pastes it into the spot defined by the %rthird %Hset of coords.");
+			p.Message("%HThe last option is optional, and defaults to false. If true, the tempchunk changes are sent to all players in the map.");
+		}
+		
+	}
 
 	public class CmdStuff : Command2 {
 		public override string name { get { return "Stuff"; } }
@@ -417,8 +417,8 @@ namespace PluginCCS {
 		}
 		public override void Help(Player p)
 		{
-            p.Message("%T/Drop [name]");
-            p.Message("%HDrops the /stuff you specify.");
+			p.Message("%T/Drop [name]");
+			p.Message("%HDrops the /stuff you specify.");
 		}
 	}
 	
@@ -474,8 +474,8 @@ namespace PluginCCS {
 		}
 		
 		public override void Help(Player p) {
-            p.Message("&T/Reply [num]");
-            p.Message("&HReplies with the option you specify.");
+			p.Message("&T/Reply [num]");
+			p.Message("&HReplies with the option you specify.");
 			p.Message("&HYou'll be prompted to use it during adventure maps.");
 		}
 	}
@@ -526,13 +526,13 @@ namespace PluginCCS {
 		}
 		
 		public override void Help(Player p) {
-            p.Message("&T/OsUploadScript [url]");
-            p.Message("&HUploads [url] as the script for your map.");
+			p.Message("&T/OsUploadScript [url]");
+			p.Message("&HUploads [url] as the script for your map.");
 		}
 	}
 	
 	public sealed class Core : Plugin {
-		public static string password = "CHANGETHIS"; //it has to be all uppercase to work
+		public static string password = "CHANGETHIS";
 		public static char[] pipeChar = new char[] { '|' };
 		public static string runArgSpaceSubstitute = "_";
 		public override string creator { get { return "Goodly"; } }
@@ -572,14 +572,14 @@ namespace PluginCCS {
 		
 		public override void Load(bool startup) {
 			
-			tempBlockCmd      = new CmdTempBlock();
-			tempChunkCmd      = new CmdTempChunk();
-			stuffCmd          = new CmdStuff();
-			dropCmd           = new CmdDrop();
-			runscriptCmd      = new CmdScript();
-			osRunscriptCmd    = new CmdOsScript();
-			replyCmd          = new CmdReplyTwo();
-			itemsCmd          = new CmdItems();
+			tempBlockCmd	  = new CmdTempBlock();
+			tempChunkCmd	  = new CmdTempChunk();
+			stuffCmd		  = new CmdStuff();
+			dropCmd			  = new CmdDrop();
+			runscriptCmd	  = new CmdScript();
+			osRunscriptCmd	  = new CmdOsScript();
+			replyCmd		  = new CmdReplyTwo();
+			itemsCmd		  = new CmdItems();
 			updateOsScriptCmd = new CmdUpdateOsScript();
 			tp = Command.Find("tp");
 			
@@ -796,8 +796,8 @@ namespace PluginCCS {
 		
 		public const string labelHelp = "%HLabels are case sensitive and must begin with #";
 		public override void Help(Player p) {
-            p.Message("%T/Script <script name> [starting label]");
-            p.Message("%HRuns a script at the given label.");
+			p.Message("%T/Script <script name> [starting label]");
+			p.Message("%HRuns a script at the given label.");
 			p.Message("If no script name is given, the map's name is used as the script name.");
 			HelpBody(p);
 		}
@@ -830,8 +830,8 @@ namespace PluginCCS {
 		}
 		
 		public override void Help(Player p) {
-            p.Message("%T/OsScript [starting label]");
-            p.Message("%HRuns the os map's script at the given label.");
+			p.Message("%T/OsScript [starting label]");
+			p.Message("%HRuns the os map's script at the given label.");
 			CmdScript.HelpBody(p);
 		}
 	}
@@ -1078,7 +1078,7 @@ namespace PluginCCS {
 		
 		public Player p;
 		public string startingLevelName;
-        public string scriptName;
+		public string scriptName;
 		public bool isOS = false;
 		public bool repeatable = false;
 		public string thisBool;
@@ -1094,7 +1094,7 @@ namespace PluginCCS {
 		public const int newThreadLimitOS = 10;
 		public List<ScriptLine> scriptActions = new List<ScriptLine>();
 		public int lineNumber = -1;
-        public Dictionary<string, int> Labels = new Dictionary<string, int>();
+		public Dictionary<string, int> Labels = new Dictionary<string, int>();
 		public const string scriptPath = "scripts/";
 		public bool hasCef = false;
 		public int amountOfCharsInLastMessage = 0;
@@ -1103,18 +1103,18 @@ namespace PluginCCS {
 	//Misc functions
 	public partial class Script {
 		
-        static byte? GetEnvColorType(string type) {
-            if (type.CaselessEq("sky"))    { return 0; }
-            if (type.CaselessEq("cloud"))  { return 1; }
+		static byte? GetEnvColorType(string type) {
+			if (type.CaselessEq("sky"))	   { return 0; }
+			if (type.CaselessEq("cloud"))  { return 1; }
 			if (type.CaselessEq("clouds")) { return 1; }
-            if (type.CaselessEq("fog"))    { return 2; }
-            if (type.CaselessEq("shadow")) { return 3; }
-            if (type.CaselessEq("sun"))    { return 4; }
-            if (type.CaselessEq("skybox")) { return 5; }
-            return null;
-        }
+			if (type.CaselessEq("fog"))	   { return 2; }
+			if (type.CaselessEq("shadow")) { return 3; }
+			if (type.CaselessEq("sun"))	   { return 4; }
+			if (type.CaselessEq("skybox")) { return 5; }
+			return null;
+		}
 		static byte? GetEnvWeatherType(string type) {
-			if (type.CaselessEq("sun"))  { return 0; }
+			if (type.CaselessEq("sun"))	 { return 0; }
 			if (type.CaselessEq("rain")) { return 1; }
 			if (type.CaselessEq("snow")) { return 2; }
 			return null;
@@ -1318,7 +1318,7 @@ namespace PluginCCS {
 					//if the last action was Reply and this action isn't, that means we're done setting up replies for now and should show the text of how to reply.
 					if (
 						scriptActions[actionIndex].actionType != Script.ActionType.Reply &&
-						                lastAction.actionType == Script.ActionType.Reply
+										lastAction.actionType == Script.ActionType.Reply
 						) {
 						//only tell if it's not being cleared
 						if (!lastAction.actionArgs.CaselessEq("clear")) { CmdReplyTwo.SetUpDone(p); }
@@ -1431,16 +1431,16 @@ namespace PluginCCS {
 			}
 			fuckyou:
 			
-			if (stringName.CaselessEq("mbx"     ))    { return this.data.MBCoords.X.ToString(); }
-			if (stringName.CaselessEq("mby"     ))    { return this.data.MBCoords.Y.ToString(); }
-			if (stringName.CaselessEq("mbz"     ))    { return this.data.MBCoords.Z.ToString(); }
-			if (stringName.CaselessEq("playerx" ))    { return p.Pos.FeetBlockCoords.X.ToString(); }
-			if (stringName.CaselessEq("playery" ))    { return p.Pos.FeetBlockCoords.Y.ToString(); }
-			if (stringName.CaselessEq("playerz" ))    { return p.Pos.FeetBlockCoords.Z.ToString(); }
-			if (stringName.CaselessEq("playerpx"))    { return p.Pos.X.ToString(); }
-			if (stringName.CaselessEq("playerpy"))    { return (p.Pos.Y-Entities.CharacterHeight).ToString(); }
-			if (stringName.CaselessEq("playerpz"))    { return p.Pos.Z.ToString(); }
-			if (stringName.CaselessEq("playeryaw"))   { return Orientation.PackedToDegrees(p.Rot.RotY).ToString();  } //yaw
+			if (stringName.CaselessEq("mbx"		))	  { return this.data.MBCoords.X.ToString(); }
+			if (stringName.CaselessEq("mby"		))	  { return this.data.MBCoords.Y.ToString(); }
+			if (stringName.CaselessEq("mbz"		))	  { return this.data.MBCoords.Z.ToString(); }
+			if (stringName.CaselessEq("playerx" ))	  { return p.Pos.FeetBlockCoords.X.ToString(); }
+			if (stringName.CaselessEq("playery" ))	  { return p.Pos.FeetBlockCoords.Y.ToString(); }
+			if (stringName.CaselessEq("playerz" ))	  { return p.Pos.FeetBlockCoords.Z.ToString(); }
+			if (stringName.CaselessEq("playerpx"))	  { return p.Pos.X.ToString(); }
+			if (stringName.CaselessEq("playerpy"))	  { return (p.Pos.Y-Entities.CharacterHeight).ToString(); }
+			if (stringName.CaselessEq("playerpz"))	  { return p.Pos.Z.ToString(); }
+			if (stringName.CaselessEq("playeryaw"))	  { return Orientation.PackedToDegrees(p.Rot.RotY).ToString();	} //yaw
 			if (stringName.CaselessEq("playerpitch")) { return Orientation.PackedToDegrees(p.Rot.HeadX).ToString(); } //pitch
 			if (stringName.CaselessEq("msgdelay")) {
 				double msgDelayMultiplier = 0;
@@ -1484,8 +1484,8 @@ namespace PluginCCS {
 				Error(); p.Message("A closing curly bracket should not appear before an opening curly bracket."); return message;
 			}
 			
-			//       oBI                         
-			//        4         9 10  12        1718       
+			//		 oBI						 
+			//		  4			9 10  12		1718	   
 			//H e y _ { n a m e } , _ { m o o d } ? 
 			
 			//Hey_{name},_{mood}?
@@ -1687,7 +1687,7 @@ namespace PluginCCS {
 			if (!GetDouble(cmdName, out value)) { return; }
 			SetDouble(cmdName, (int)op(value));
 		}
-		public void SetRound()     { DoRound((value) => Math.Round(value, MidpointRounding.AwayFromZero)); }
+		public void SetRound()	   { DoRound((value) => Math.Round(value, MidpointRounding.AwayFromZero)); }
 		public void SetRoundUp()   { DoRound((value) => Math.Ceiling(value)); }
 		public void SetRoundDown() { DoRound((value) => Math.Floor(value)); }
 		public void Quit() {
@@ -1745,7 +1745,7 @@ namespace PluginCCS {
 		public void Item() {
 			if (cmdArgs == "") { Error(); p.Message("&cNot enough arguments for Item action"); return; }
 			ScriptData scriptData = Core.GetScriptData(p);
-			if (cmdName == "get" || cmdName == "give")    { scriptData.GiveItem(cmdArgs, isOS); return; }
+			if (cmdName == "get" || cmdName == "give")	  { scriptData.GiveItem(cmdArgs, isOS); return; }
 			if (cmdName == "take" || cmdName == "remove") { scriptData.TakeItem(cmdArgs, isOS); return; } 
 			Error(); p.Message("&cUnknown function for Item action: \"{0}\"", cmdName);
 		}
@@ -1817,8 +1817,8 @@ namespace PluginCCS {
 			if (replyBits.Length < 3) { Error(); p.Message("&cNot enough arguments to setup a reply: \"" + args + "\"."); return; }
 			int replyNum = -1;
 			if (!CommandParser.GetInt(p, replyBits[0], "Script setup reply number", ref replyNum, 1, CmdReplyTwo.maxReplyCount)) { Error(true); return; }
-			string replyMessage        = replyBits[1];
-			string labelName           = replyBits[2];
+			string replyMessage		   = replyBits[1];
+			string labelName		   = replyBits[2];
 			
 			//replyNum is from 1-6 but replies is indexed from 0-5
 			scriptData.replies[replyNum-1] = new ReplyData(scriptName, labelName, isOS, notifyPlayer);
@@ -1829,11 +1829,11 @@ namespace PluginCCS {
 		public void TempBlock() { DoCmd(Core.tempBlockCmd, args); }
 		public void TempChunk() { DoCmd(Core.tempChunkCmd, args); }
 		public void Reach() {
-            double dist = 0;
+			double dist = 0;
 			if (!GetDoubleRawOrVal(cmdName, "Reach", out dist)) { return; }
-            
-            int packedDist = (int)(dist * 32);
-            if (packedDist > short.MaxValue) { Error(); p.Message("&cReach of \"{0}\", is too long. Max is 1023 blocks.", dist); return; }
+			
+			int packedDist = (int)(dist * 32);
+			if (packedDist > short.MaxValue) { Error(); p.Message("&cReach of \"{0}\", is too long. Max is 1023 blocks.", dist); return; }
 			
 			p.Send(Packet.ClickDistance((short)packedDist));
 		}
@@ -1900,15 +1900,15 @@ namespace PluginCCS {
 			string filePath, fileName;
 			if (!DoesDirectoryExist(out filePath, out fileName) || !File.Exists(fileName)) { return; } //no data to load
 			
-            string value = "";
-            using (StreamReader sr = new StreamReader(fileName)) {
-                while ((value = sr.ReadLine()) != null) {
+			string value = "";
+			using (StreamReader sr = new StreamReader(fileName)) {
+				while ((value = sr.ReadLine()) != null) {
 					if (!value.StartsWith(prefixedMarker)) { continue; } //something went terribly wrong there should not be data that doesn't begin with a fully formed saved string name
 					string[] bits = value.SplitSpaces(2);
 					if (bits.Length < 2) { continue; }
 					savedStrings[bits[0]] = bits[1];
-                }
-            }
+				}
+			}
 		}
 		public void OnJoinedLevel() {
 			SetRepliesNull();
@@ -1918,7 +1918,7 @@ namespace PluginCCS {
 		}
 		public void Reset(bool values, bool items) {
 			if (values) { strings.Clear(); }
-			if (items)  { osItems.Clear(); }
+			if (items)	{ osItems.Clear(); }
 		}
 		public void ResetSavedStrings(string scriptName) {
 			string prefix = (prefixedMarker+scriptName+"_").ToUpper();
@@ -1937,13 +1937,13 @@ namespace PluginCCS {
 			string filePath, fileName;
 			if (!DoesDirectoryExist(out filePath, out fileName)) { Directory.CreateDirectory(filePath); }
 			
-            using (StreamWriter file = new StreamWriter(fileName, false)) {
-                foreach (KeyValuePair<string, string> entry in savedStrings) {
+			using (StreamWriter file = new StreamWriter(fileName, false)) {
+				foreach (KeyValuePair<string, string> entry in savedStrings) {
 					if (entry.Value.Length == 0 || entry.Value == "0" || entry.Value.CaselessEq("false")) { continue; }
-                    file.WriteLine(entry.Key+" "+entry.Value);
+					file.WriteLine(entry.Key+" "+entry.Value);
 					//p.Message("&ewriting &0{0}&e to {1}", entry.Key+" "+entry.Value, fileName);
-                }
-            }
+				}
+			}
 		}
 		bool DoesDirectoryExist(out string filePath, out string fileName) {
 			//delete wrong location of data.txt
@@ -1990,11 +1990,11 @@ namespace PluginCCS {
 		}
 		
 		
-        public bool HasItem (string itemName, bool isOS) { return isOS ? OsHasItem(itemName) : ModHasItem(itemName); }
+		public bool HasItem (string itemName, bool isOS) { return isOS ? OsHasItem(itemName) : ModHasItem(itemName); }
 		public void GiveItem(string itemName, bool isOS) { if (isOS) { OsGiveItem(itemName); } else { ModGiveItem(itemName); } }
 		public void TakeItem(string itemName, bool isOS) { if (isOS) { OsTakeItem(itemName); } else { ModTakeItem(itemName); } }
 		
-        private bool ModHasItem(string itemName)  { return Helpers.ItemExists(p, itemName); }
+		private bool ModHasItem(string itemName)  { return Helpers.ItemExists(p, itemName); }
 		private void ModGiveItem(string itemName) { Core.stuffCmd.Use(p, Core.password +" get "+itemName.ToUpper()); }
 		private void ModTakeItem(string itemName) { Core.stuffCmd.Use(p, Core.password +" take "+itemName.ToUpper()); }
 		
@@ -2013,7 +2013,7 @@ namespace PluginCCS {
 			p.Message("Notably, items are different from &T/stuff&S because they will disappear if you leave this map.");
 		}
 		
-        public bool OsHasItem(string itemName) { return osItems.ContainsKey( itemName.ToUpper() ); }
+		public bool OsHasItem(string itemName) { return osItems.ContainsKey( itemName.ToUpper() ); }
 		public void OsGiveItem(string itemName) {
 			itemName = itemName.ToUpper();
 			if (osItems.ContainsKey(itemName)) { return; } //they already have this item
