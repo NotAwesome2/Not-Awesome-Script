@@ -2,11 +2,13 @@
 //reference System.dll
 //reference Cmdhelpers.dll
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Net;
 using MCGalaxy;
 using MCGalaxy.Maths;
@@ -856,7 +858,7 @@ namespace PluginCCS {
                 p.Message("&cScript error: do not run scripts at the same time as uploading them ({0})", e.Message); return null;
             }
             
-            if (scriptLines.Length == 0) { p.Message("&cScript error: script \"" + scriptName + "\" does not exist!"); return null; }
+            if (scriptLines.Length == 0) { p.Message("&cScript error: script \"{0}\" does not exist!", scriptName + extension); return null; }
             
             int lineNumber = 0;
             foreach(string lineRead in scriptLines) {
@@ -1727,19 +1729,21 @@ namespace PluginCCS {
         }
         public void ResetData() {
             ScriptData scriptData = Core.GetScriptData(p);
-            bool values = args.CaselessContains("packages");
-            bool items = args.CaselessContains("items");
-            bool saved = args.CaselessContains("saved");
-            if (!(values || items || saved)) { Error(); p.Message("&cYou must specify what type of data to reset"); return; }
-            
-            if (isOS) {
-                if (saved) { Error(); p.Message("&cCannot reset saved packages in os script"); return; }
-                scriptData.Reset(values, items);
-            } else {
-                if (items) { Error(); p.Message("&cCannot reset items in non-os script"); return; }
-                scriptData.Reset(values, false);
-                if (saved) { scriptData.ResetSavedStrings(scriptName); }
+            if (cmdName.CaselessStarts("packages")) {
+                scriptData.Reset(true, false, cmdArgs);
+                return;
             }
+            if (cmdName.CaselessStarts("items")) {
+                if (!isOS) { Error(); p.Message("&cCannot reset items in non-os script"); return; }
+                scriptData.Reset(false, true, cmdArgs);
+                return;
+            }
+            if (cmdName.CaselessStarts("saved")) {
+                if (isOS) { Error(); p.Message("&cCannot reset saved packages in os script (because there are none)"); return; }
+                scriptData.ResetSavedStrings(scriptName, cmdArgs);
+                return;
+            }
+            Error(); p.Message("&cYou must specify what type of data to reset");
         }
         public void Item() {
             if (cmdArgs == "") { Error(); p.Message("&cNot enough arguments for Item action"); return; }
@@ -1913,23 +1917,46 @@ namespace PluginCCS {
             SetRepliesNull();
             frozen = false;
             stareCoords = null;
-            Reset(true, true);
+            Reset(true, true, "");
         }
-        public void Reset(bool values, bool items) {
-            if (values) { strings.Clear(); }
-            if (items)  { osItems.Clear(); }
+        public void Reset(bool packages, bool items, string matcher) {
+            if (packages) { ResetDict(strings, matcher); }
+            if (items)  { ResetDict(osItems, matcher); }
         }
-        public void ResetSavedStrings(string scriptName) {
-            string prefix = (prefixedMarker+scriptName+"_").ToUpper();
-            List<string> keysToRemove = new List<string>();
-            
-            foreach(KeyValuePair<string, string> entry in savedStrings) {
-                if (entry.Key.StartsWith(prefix)) { keysToRemove.Add(entry.Key); }
-            }
+        public void ResetDict(IDictionary dict, string matcher) {
+            if (matcher.Length == 0) { dict.Clear(); return; }
+            List<string> keysToRemove = MatchingKeys(dict, matcher);
             foreach (string key in keysToRemove) {
-                savedStrings.Remove(key);
+                //p.Message("removing key {0}", key);
+                dict.Remove(key);
             }
         }
+        public void ResetSavedStrings(string scriptName, string matcher) {
+            string prefix = (prefixedMarker+scriptName+"_").ToUpper();
+            string pattern = prefix+"*"+matcher;
+            if (!(matcher.Contains("*") || matcher.Contains("?"))) {
+                //if there are no special characters, it's a generic "contains" search, so add asterisk at the end
+                pattern = pattern+"*";
+            }
+            ResetDict(savedStrings, pattern);
+        }
+        static List<string> MatchingKeys(IDictionary dict, string keyword) {
+            List<string> matches = new List<string>();
+            Regex regex = null;
+            // wildcard matching
+            if (keyword.Contains("*") || keyword.Contains("?")) {
+                string pattern = "^" + Regex.Escape(keyword).Replace("\\?", ".").Replace("\\*", ".*") + "$";
+                regex = new Regex(pattern, RegexOptions.IgnoreCase);
+            }
+            foreach(var key in dict.Keys) {
+                string name = (string)key; 
+                if (regex != null) { if (!regex.IsMatch(name)) continue; }
+                else { if (!name.CaselessContains(keyword))    continue; }
+                matches.Add(name);
+            }
+            return matches;
+        }
+        
         public void Dispose() {
             //if (savedStrings.Count == 0) { return; } //if all saved data is erased the file still needs to be written to to reset it so this should stay commented out
             
