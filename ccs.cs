@@ -1024,6 +1024,9 @@ namespace PluginCCS {
                           case "reach":
                               scriptLine.actionType = Script.ActionType.Reach;
                               break;
+                          case "setblockid":
+                              scriptLine.actionType = Script.ActionType.SetBlockID;
+                              break;
                           default:
                               p.Message("&cError when compiling script on line "+lineNumber+": unknown Action \"" + actionType + "\" detected.");
                               return null;
@@ -1541,7 +1544,7 @@ namespace PluginCCS {
             Set, SetAdd, SetSub, SetMul, SetDiv, SetMod, SetRandRange, SetRandRangeDecimal, SetRandList, SetRound, SetRoundUp, SetRoundDown,
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
-            TempBlock, TempChunk, Reach
+            TempBlock, TempChunk, Reach, SetBlockID
             };
         }
         public enum ActionType : int {
@@ -1549,7 +1552,7 @@ namespace PluginCCS {
             Set, SetAdd, SetSub, SetMul, SetDiv, SetMod, SetRandRange, SetRandRangeDecimal, SetRandList, SetRound, SetRoundUp, SetRoundDown,
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
-            TempBlock, TempChunk, Reach
+            TempBlock, TempChunk, Reach, SetBlockID
         }
         public ScriptAction[] Actions;
         
@@ -1839,6 +1842,23 @@ namespace PluginCCS {
             if (packedDist > short.MaxValue) { Error(); p.Message("&cReach of \"{0}\", is too long. Max is 1023 blocks.", dist); return; }
             
             p.Send(Packet.ClickDistance((short)packedDist));
+        }
+        public void SetBlockID() {
+            string[] bits = args.SplitSpaces(4);
+            if (bits.Length < 4) {
+                Error();
+                p.Message("&cYou need to specify a package and x y z coordinates of the block to retrieve the ID of.");
+                return;
+            }
+            string packageName = bits[0];
+            string[] stringCoords = new string[] { bits[1], bits[2], bits[3] };
+            
+            Vec3S32 coords = new Vec3S32();
+            if (!CommandParser.GetCoords(p, stringCoords, 0, ref coords)) { Error(true); }
+            SetString(packageName, ClientBlockID(p.level.GetBlock((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z)).ToString());
+        }
+        static BlockID ClientBlockID(BlockID serverBlockID) {
+            return Block.ToRaw(Block.Convert(serverBlockID));
         }
     }
     
