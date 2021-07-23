@@ -1923,7 +1923,7 @@ namespace PluginCCS {
             if (packages) { ResetDict(strings, matcher); }
             if (items)  { ResetDict(osItems, matcher); }
         }
-        public void ResetDict(IDictionary dict, string matcher) {
+        public void ResetDict<T>(Dictionary<string, T> dict, string matcher) {
             if (matcher.Length == 0) { dict.Clear(); return; }
             List<string> keysToRemove = MatchingKeys(dict, matcher);
             foreach (string key in keysToRemove) {
@@ -1940,21 +1940,9 @@ namespace PluginCCS {
             }
             ResetDict(savedStrings, pattern);
         }
-        static List<string> MatchingKeys(IDictionary dict, string keyword) {
-            List<string> matches = new List<string>();
-            Regex regex = null;
-            // wildcard matching
-            if (keyword.Contains("*") || keyword.Contains("?")) {
-                string pattern = "^" + Regex.Escape(keyword).Replace("\\?", ".").Replace("\\*", ".*") + "$";
-                regex = new Regex(pattern, RegexOptions.IgnoreCase);
-            }
-            foreach(var key in dict.Keys) {
-                string name = (string)key; 
-                if (regex != null) { if (!regex.IsMatch(name)) continue; }
-                else { if (!name.CaselessContains(keyword))    continue; }
-                matches.Add(name);
-            }
-            return matches;
+        static List<string> MatchingKeys<T>(Dictionary<string, T> dict, string keyword) {
+            var keys = dict.Keys.ToList();
+            return Matcher.Filter(keys, keyword, key => key);
         }
         
         public void Dispose() {
