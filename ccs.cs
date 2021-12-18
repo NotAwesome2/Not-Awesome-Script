@@ -545,6 +545,7 @@ namespace PluginCCS {
         public static ScriptData GetScriptData(Player p) {
             ScriptData sd;
             if (scriptDataAtPlayer.TryGetValue(p.name, out sd)) { return sd; }
+            //throw new System.Exception("Tried to get script data for "+p.name+" but there was NOTHING there");
             return null;
         }
         
@@ -1027,6 +1028,12 @@ namespace PluginCCS {
                           case "setblockid":
                               scriptLine.actionType = Script.ActionType.SetBlockID;
                               break;
+                          case "definehotkey":
+                              scriptLine.actionType = Script.ActionType.DefineHotkey;
+                              break;
+                          case "undefinehotkey":
+                              scriptLine.actionType = Script.ActionType.UndefineHotkey;
+                              break;
                           default:
                               p.Message("&cError when compiling script on line "+lineNumber+": unknown Action \"" + actionType + "\" detected.");
                               return null;
@@ -1428,6 +1435,8 @@ namespace PluginCCS {
             SetString(valName, value.ToString());
         }
         public string GetString(string stringName) {
+            if (p == null) { throw new System.Exception("Player null in GetString new pdb pls"); }
+            
             if (stringName.Length > 6 && stringName.CaselessStarts("runArg")) {
                 int runArgIndex;
                 if (!Int32.TryParse(stringName.Substring(6), out runArgIndex) ) { goto fuckyou; }
@@ -1544,7 +1553,8 @@ namespace PluginCCS {
             Set, SetAdd, SetSub, SetMul, SetDiv, SetMod, SetRandRange, SetRandRangeDecimal, SetRandList, SetRound, SetRoundUp, SetRoundDown,
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
-            TempBlock, TempChunk, Reach, SetBlockID
+            TempBlock, TempChunk, Reach, SetBlockID,
+            DefineHotkey, UndefineHotkey
             };
         }
         public enum ActionType : int {
@@ -1552,7 +1562,8 @@ namespace PluginCCS {
             Set, SetAdd, SetSub, SetMul, SetDiv, SetMod, SetRandRange, SetRandRangeDecimal, SetRandList, SetRound, SetRoundUp, SetRoundDown,
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
-            TempBlock, TempChunk, Reach, SetBlockID
+            TempBlock, TempChunk, Reach, SetBlockID,
+            DefineHotkey, UndefineHotkey
         }
         public ScriptAction[] Actions;
         
@@ -1790,6 +1801,9 @@ namespace PluginCCS {
         public void MOTD() {
             if (args.CaselessEq("ignore")) { p.SendMapMotd(); return; }
             p.Send(Packet.Motd(p, args));
+            if (p.Supports(CpeExt.HackControl)) {
+                p.Send(Hacks.MakeHackControl(p, args));
+            }
         }
         public void SetSpawn() {
             Vec3S32 coords;
@@ -1860,6 +1874,44 @@ namespace PluginCCS {
         static BlockID ClientBlockID(BlockID serverBlockID) {
             return Block.ToRaw(Block.Convert(serverBlockID));
         }
+        public void DefineHotkey() {
+            // definehotkey [input args]|[key name]|<list of space separated modifiers>
+            // definehotkey this is put into slash input!|equals|alt shift
+            
+            string[] bits = args.Split(Core.pipeChar);
+            if (bits.Length < 2) { Error(); p.Message("&cNot enough arguments to define a hotkey: \"" + args + "\"."); return; }
+            
+            ScriptData scriptData = Core.GetScriptData(p);
+            
+            string content = bits[0];
+            int keyCode = scriptData.hotkeys.GetKeyCode(bits[1]);
+            string modifierArgs = bits.Length > 2 ? bits[2].ToLower() : "";
+            
+            if (keyCode == 0) { Error(true); return; }
+            
+            string action = Hotkeys.FullAction(content);
+            if (action.Length > NetUtils.StringSize) {
+                Error();
+                p.Message("&cThe hotkey that script is trying to send (&7{0}&c) is &e{1}&c characters long, but can only be &a{2}&c at most.", action, action.Length, NetUtils.StringSize);
+                p.Message("You can remove &a{0}&S or more characters to fix this error.", action.Length - NetUtils.StringSize);
+                return;
+            }
+            
+            byte modifiers = Hotkeys.GetModifiers(modifierArgs);
+            scriptData.hotkeys.Define(action, keyCode, modifiers);
+        }
+        public void UndefineHotkey() {
+            string[] bits = args.Split(Core.pipeChar);
+            ScriptData scriptData = Core.GetScriptData(p);
+            int keyCode = scriptData.hotkeys.GetKeyCode(bits[0]); if (keyCode == 0) { Error(true); return; }
+            
+            byte modifiers = 0;
+            if (bits.Length > 1) {
+                string modifierArgs = bits[1];
+                modifiers = Hotkeys.GetModifiers(modifierArgs);
+            }
+            scriptData.hotkeys.Undefine(keyCode, modifiers);
+        }
     }
     
     
@@ -1902,6 +1954,8 @@ namespace PluginCCS {
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
         private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
         
+        public Hotkeys hotkeys;
+        
         private void SetRepliesNull() {
             for (int i = 0; i < replies.Length; i++) {
                 replies[i] = null;
@@ -1919,10 +1973,11 @@ namespace PluginCCS {
         public ScriptData(Player p) {
             this.p = p;
             SetRepliesNull();
+            hotkeys = new Hotkeys(p);
+            
             
             string filePath, fileName;
             if (!DoesDirectoryExist(out filePath, out fileName) || !File.Exists(fileName)) { return; } //no data to load
-            
             string value = "";
             using (StreamReader sr = new StreamReader(fileName)) {
                 while ((value = sr.ReadLine()) != null) {
@@ -1938,6 +1993,7 @@ namespace PluginCCS {
             frozen = false;
             stareCoords = null;
             Reset(true, true, "");
+            hotkeys.UndefineAll();
         }
         public void Reset(bool packages, bool items, string matcher) {
             if (packages) { ResetDict(strings, matcher); }
@@ -2062,5 +2118,193 @@ namespace PluginCCS {
             }
         }
         //#endregion
+        
     }
+    
+    public class Hotkeys {
+        private static readonly Dictionary<string, int> keyCodes
+            = new Dictionary<string, int>
+        {
+            { "NONE",         0   },
+            { "ESCAPE",       1   },
+            { "1",            2   },
+            { "2",            3   },
+            { "3",            4   },
+            { "4",            5   },
+            { "5",            6   },
+            { "6",            7   },
+            { "7",            8   },
+            { "8",            9   },
+            { "9",            10  },
+            { "0",            11  },
+            { "MINUS",        12  },
+            { "EQUALS",       13  },
+            { "BACK",         14  },
+            { "TAB",          15  },
+            { "Q",            16  },
+            { "W",            17  },
+            { "E",            18  },
+            { "R",            19  },
+            { "T",            20  },
+            { "Y",            21  },
+            { "U",            22  },
+            { "I",            23  },
+            { "O",            24  },
+            { "P",            25  },
+            { "LBRACKET",     26  },
+            { "RBRACKET",     27  },
+            { "RETURN",       28  },
+            { "LCONTROL",     29  },
+            { "A",            30  },
+            { "S",            31  },
+            { "D",            32  },
+            { "F",            33  },
+            { "G",            34  },
+            { "H",            35  },
+            { "J",            36  },
+            { "K",            37  },
+            { "L",            38  },
+            { "SEMICOLON",    39  },
+            { "APOSTROPHE",   40  },
+            { "GRAVE",        41  },
+            { "LSHIFT",       42  },
+            { "BACKSLASH",    43  },
+            { "Z",            44  },
+            { "X",            45  },
+            { "C",            46  },
+            { "V",            47  },
+            { "B",            48  },
+            { "N",            49  },
+            { "M",            50  },
+            { "COMMA",        51  },
+            { "PERIOD",       52  },
+            { "SLASH",        53  },
+            { "RSHIFT",       54  },
+            { "MULTIPLY",     55  },
+            { "LMENU",        56  },
+            { "SPACE",        57  },
+            { "CAPITAL",      58  },
+            { "F1",           59  },
+            { "F2",           60  },
+            { "F3",           61  },
+            { "F4",           62  },
+            { "F5",           63  },
+            { "F6",           64  },
+            { "F7",           65  },
+            { "F8",           66  },
+            { "F9",           67  },
+            { "F10",          68  },
+            { "NUMLOCK",      69  },
+            { "SCROLL",       70  },
+            { "NUMPAD7",      71  },
+            { "NUMPAD8",      72  },
+            { "NUMPAD9",      73  },
+            { "SUBTRACT",     74  },
+            { "NUMPAD4",      75  },
+            { "NUMPAD5",      76  },
+            { "NUMPAD6",      77  },
+            { "ADD",          78  },
+            { "NUMPAD1",      79  },
+            { "NUMPAD2",      80  },
+            { "NUMPAD3",      81  },
+            { "NUMPAD0",      82  },
+            { "DECIMAL",      83  },
+            { "F11",          87  },
+            { "F12",          88  },
+            { "F13",          100 },
+            { "F14",          101 },
+            { "F15",          102 },
+            { "F16",          103 },
+            { "F17",          104 },
+            { "F18",          105 },
+            { "KANA",         112 },
+            { "F19",          113 },
+            { "CONVERT",      121 },
+            { "NOCONVERT",    123 },
+            { "YEN",          125 },
+            { "NUMPADEQUALS", 141 },
+            { "CIRCUMFLEX",   144 },
+            { "AT",           145 },
+            { "COLON",        146 },
+            { "UNDERLINE",    147 },
+            { "KANJI",        148 },
+            { "STOP",         149 },
+            { "AX",           150 },
+            { "UNLABELED",    151 },
+            { "NUMPADENTER",  156 },
+            { "RCONTROL",     157 },
+            { "SECTION",      167 },
+            { "NUMPADCOMMA",  179 },
+            { "DIVIDE",       181 },
+            { "SYSRQ",        183 },
+            { "RMENU",        184 },
+            { "FUNCTION",     196 },
+            { "PAUSE",        197 },
+            { "HOME",         199 },
+            { "UP",           200 },
+            { "PRIOR",        201 },
+            { "LEFT",         203 },
+            { "RIGHT",        205 },
+            { "END",          207 },
+            { "DOWN",         208 },
+            { "NEXT",         209 },
+            { "INSERT",       210 },
+            { "DELETE",       211 },
+            { "CLEAR",        218 },
+            { "LMETA",        219 },
+            { "RMETA",        220 },
+            { "APPS",         221 },
+            { "POWER",        222 },
+            { "SLEEP",        223 }
+        };
+        
+        public static string FullAction(string content) {
+            return "/input "+content+"◙";
+        }
+        public static byte GetModifiers(string modifierArgs) {
+            byte ctrlFlag  = (byte)(modifierArgs.Contains("ctrl")  ? 1 : 0);
+            byte shiftFlag = (byte)(modifierArgs.Contains("shift") ? 2 : 0);
+            byte altFlag   = (byte)(modifierArgs.Contains("alt")   ? 4 : 0);
+            return (byte)(ctrlFlag | shiftFlag | altFlag);
+        }
+        
+        private Player p;
+        private List<Hotkey> hotkeys = new List<Hotkey>();
+        public Hotkeys(Player p) {
+            this.p = p;
+        }
+        
+        public int GetKeyCode(string keyName) {
+            int code = 0;
+            if (!keyCodes.TryGetValue(keyName.ToUpper(), out code)) {
+                p.Message("&cUnrecognized key name \"{0}\". Please see https://minecraft.fandom.com/el/wiki/Key_codes#Full_table for valid key names.", keyName);
+                p.Message("&bRemember to use the NAME of the key and not the numberical code/value!");
+            }
+            return code;
+        }
+        
+        public void Define(string action, int keyCode, byte modifiers) {
+            p.Send(Packet.TextHotKey("na2 script hotkey", action, keyCode, modifiers, true));
+            hotkeys.Add(new Hotkey(keyCode, modifiers));
+        }
+        public void Undefine(int keyCode, byte modifiers) {
+            p.Send(Packet.TextHotKey("", "", keyCode, modifiers, true));
+        }
+        public void UndefineAll() {
+            foreach (Hotkey hotkey in hotkeys) {
+                Undefine(hotkey.keyCode, hotkey.modifiers);
+            }
+        }
+    }
+    public class Hotkey {
+        //public string action
+        public int keyCode;
+        public byte modifiers;
+        public Hotkey(int keyCode, byte modifiers) {
+            this.keyCode = keyCode; this.modifiers = modifiers;
+        }
+    }
+    
+    
+    
 }
