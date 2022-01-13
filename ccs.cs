@@ -2302,7 +2302,7 @@ namespace PluginCCS {
             int code = 0;
             if (!keyCodes.TryGetValue(keyName.ToUpper(), out code)) {
                 p.Message("&cUnrecognized key name \"{0}\". Please see https://minecraft.fandom.com/el/wiki/Key_codes#Full_table for valid key names.", keyName);
-                p.Message("&bRemember to use the NAME of the key and not the numberical code/value!");
+                p.Message("&bRemember to use the NAME of the key and not the numerical code/value!");
             }
             return code;
         }
