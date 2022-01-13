@@ -639,22 +639,27 @@ namespace PluginCCS {
             //Logger.Log(LogType.SystemActivity, "ccs CONECTING " + p.name + " : " + Environment.StackTrace);
             
             if (scriptDataAtPlayer.ContainsKey(p.name)) {
+                //this happens when they Reconnect.
+                scriptDataAtPlayer[p.name].UpdatePlayerReference(p);
                 Logger.Log(LogType.SystemActivity, "ccs ScriptData already exists for player: " + p.name);
                 return;
             }
             scriptDataAtPlayer[p.name] = new ScriptData(p);
         }
         static void OnPlayerDisconnect(Player p, string reason) {
-            //Logger.Log(LogType.SystemActivity, "ccs DISCONNECTING " + p.name + " : " + Environment.StackTrace);
+            
             if (reason.StartsWith("(Reconnecting")) {
                 Logger.Log(LogType.SystemActivity, "ccs is not clearing scriptdata due to player reconnecting: " + p.name);
                 return;
             }
+            
+            
             ScriptData data;
             if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) {
                 //Chat.MessageGlobal("{0} caused an error in PluginCCS when disconnecting", p.name);
                 throw new ArgumentException("There was no "+p.name+" ScriptData to handle OnPlayerDisconnect");
             }
+
             data.Dispose();
             scriptDataAtPlayer.Remove(p.name);
         }
@@ -1726,8 +1731,9 @@ namespace PluginCCS {
         public void Show() {
             string[] values = args.SplitSpaces();
             bool saved;
+            ScriptData data = Core.GetScriptData(p);
             foreach (string value in values) {
-                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", Core.GetScriptData(p).ValidateStringName(value, isOS, scriptName, out saved), GetString(value));
+                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", data.ValidateStringName(value, isOS, scriptName, out saved), GetString(value));
             }
         }
         public void Kill() {
@@ -1771,9 +1777,13 @@ namespace PluginCCS {
             p.Send(Packet.Motd(p, "-hax horspeed=0.000001 jumps=0 -push"));
         }
         public void Unfreeze() {
-            //TODO: make this revert to currently set motd if there is one
-            Core.GetScriptData(p).frozen = false;
-            p.SendMapMotd();
+            ScriptData data = Core.GetScriptData(p);
+            data.frozen = false;
+            if (data.customMOTD != null) {
+                SendMOTD(data.customMOTD);
+            } else {
+                p.SendMapMotd();
+            }
         }
         bool GetCoords(string actionName, out Vec3S32 coords) {
             string[] stringCoords = args.SplitSpaces();
@@ -1799,10 +1809,16 @@ namespace PluginCCS {
             SetEnv(args);
         }
         public void MOTD() {
-            if (args.CaselessEq("ignore")) { p.SendMapMotd(); return; }
-            p.Send(Packet.Motd(p, args));
+            ScriptData data = Core.GetScriptData(p);
+            if (args.CaselessEq("ignore")) { data.customMOTD = null; p.SendMapMotd(); return; }
+            
+            data.customMOTD = args;
+            SendMOTD(data.customMOTD);
+        }
+        public void SendMOTD(string motd) {
+            p.Send(Packet.Motd(p, motd));
             if (p.Supports(CpeExt.HackControl)) {
-                p.Send(Hacks.MakeHackControl(p, args));
+                p.Send(Hacks.MakeHackControl(p, motd));
             }
         }
         public void SetSpawn() {
@@ -1947,12 +1963,14 @@ namespace PluginCCS {
         public const string savePath = "text/inventory/";
         public Player p;
         public bool frozen = false;
+        public string customMOTD = null;
         public Vec3S32? stareCoords = null;
         public ReplyData[] replies = new ReplyData[CmdReplyTwo.maxReplyCount];
         
         private Dictionary<string, string> strings = new Dictionary<string, string>();
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
         private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
+
         
         public Hotkeys hotkeys;
         
@@ -1988,12 +2006,17 @@ namespace PluginCCS {
                 }
             }
         }
+        public void UpdatePlayerReference(Player p) {
+            this.p = p;
+            hotkeys.UpdatePlayerReference(p);
+        }
         public void OnJoinedLevel() {
             SetRepliesNull();
             frozen = false;
             stareCoords = null;
             Reset(true, true, "");
             hotkeys.UndefineAll();
+            customMOTD = null;
         }
         public void Reset(bool packages, bool items, string matcher) {
             if (packages) { ResetDict(strings, matcher); }
@@ -2273,6 +2296,7 @@ namespace PluginCCS {
         public Hotkeys(Player p) {
             this.p = p;
         }
+        public void UpdatePlayerReference(Player p) { this.p = p; }
         
         public int GetKeyCode(string keyName) {
             int code = 0;
