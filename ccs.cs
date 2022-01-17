@@ -1039,6 +1039,9 @@ namespace PluginCCS {
                           case "undefinehotkey":
                               scriptLine.actionType = Script.ActionType.UndefineHotkey;
                               break;
+                          case "placeblock":
+                              scriptLine.actionType = Script.ActionType.PlaceBlock;
+                              break;
                           default:
                               p.Message("&cError when compiling script on line "+lineNumber+": unknown Action \"" + actionType + "\" detected.");
                               return null;
@@ -1559,7 +1562,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey
+            DefineHotkey, UndefineHotkey, PlaceBlock
             };
         }
         public enum ActionType : int {
@@ -1568,7 +1571,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey
+            DefineHotkey, UndefineHotkey, PlaceBlock
         }
         public ScriptAction[] Actions;
         
@@ -1927,6 +1930,26 @@ namespace PluginCCS {
                 modifiers = Hotkeys.GetModifiers(modifierArgs);
             }
             scriptData.hotkeys.Undefine(keyCode, modifiers);
+        }
+        public void PlaceBlock() {
+            string[] bits = args.SplitSpaces();
+            Vec3S32 coords = new Vec3S32();
+            if (bits.Length < 4) { Error(); p.Message("&cNot enough arguments for placeblock"); return; }
+            if (!CommandParser.GetCoords(p, bits, 1, ref coords)) { Error(true); return; }
+            
+            BlockID block = 0;
+            if (!CommandParser.GetBlock(p, bits[0], out block)) return;
+            
+            if (!MCGalaxy.Group.GuestRank.Blocks[block]) {
+                string blockName = Block.GetName(p, block);
+                Error(); p.Message("&cRank {0} &cis not allowed to use block \"{1}\". Therefore, script cannot place it.", MCGalaxy.Group.GuestRank.ColoredName, blockName);
+                return;
+            }
+            
+            coords = p.level.ClampPos(coords);
+            
+            p.level.UpdateBlock(p, (ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
+            
         }
     }
     
