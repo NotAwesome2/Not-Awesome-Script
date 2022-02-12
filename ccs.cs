@@ -1948,7 +1948,8 @@ namespace PluginCCS {
             
             coords = p.level.ClampPos(coords);
             
-            p.level.UpdateBlock(p, (ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
+            p.level.SetBlock(       (ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
+            p.level.BroadcastChange((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
             
         }
     }
