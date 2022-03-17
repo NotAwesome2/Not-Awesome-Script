@@ -851,6 +851,7 @@ namespace PluginCCS {
             Script script = new Script();
             
             script.p = p;
+            script.startingLevel = p.level;
             script.startingLevelName = p.level.name;
             script.scriptName = scriptName;
             script.isOS = isOS;
@@ -1097,6 +1098,7 @@ namespace PluginCCS {
         }
         
         public Player p;
+        public Level startingLevel;
         public string startingLevelName;
         public string scriptName;
         public bool isOS = false;
@@ -1305,6 +1307,9 @@ namespace PluginCCS {
             if (p.appName != null && p.appName.Contains("+ cef")) {
                 hasCef = true;
                 SetString("cef", "true");
+            }
+            if (p.appName != null && p.appName.CaselessContains("mobile") || p.appName.CaselessContains("android")) {
+                SetString("mobile", "true");
             }
             SetString("msgdelaymultiplier", "64");
             
@@ -1795,6 +1800,13 @@ namespace PluginCCS {
             if (!CommandParser.GetCoords(p, stringCoords, 0, ref coords)) { Error(true); return false; }
             return true;
         }
+        bool GetCoordsFloat(string actionName, out Vec3F32 coords) {
+            string[] stringCoords = args.SplitSpaces();
+            coords = new Vec3F32();
+            if (stringCoords.Length < 3) { Error(); p.Message("&cNot enough arguments for {0}", actionName); return false; }
+            if (!CommandParser2.GetCoords(p, stringCoords, 0, ref coords)) { Error(true); return false; }
+            return true;
+        }
         public void Look() {
             Vec3S32 coords;
             if (!GetCoords("Look", out coords)) { return; } 
@@ -1825,13 +1837,16 @@ namespace PluginCCS {
             }
         }
         public void SetSpawn() {
-            Vec3S32 coords;
-            if (!GetCoords("SetSpawn", out coords)) { return; } 
+            Vec3F32 coords;
+            if (!GetCoordsFloat("SetSpawn", out coords)) { return; } 
             
             Position pos = new Position();
-            pos.X = coords.X * 32 + 16;
-            pos.Y = coords.Y * 32 + Entities.CharacterHeight;
-            pos.Z = coords.Z * 32 + 16;
+            pos.X = (int)(coords.X * 32) + 16;
+            pos.Y = (int)(coords.Y * 32) + Entities.CharacterHeight;
+            pos.Z = (int)(coords.Z * 32) + 16;
+            //p.Message("coords {0} {1} {2}", coords.X, coords.Y, coords.Z);
+            //p.Message("pos.X {0} pos.Y {1} pos.Z {2}", pos.X, pos.Y, pos.Z);
+            
             if (p.Supports(CpeExt.SetSpawnpoint)) {
                 p.Send(Packet.SetSpawnpoint(pos, p.Rot, p.Supports(CpeExt.ExtEntityPositions)));
             } else {
@@ -1946,10 +1961,10 @@ namespace PluginCCS {
                 return;
             }
             
-            coords = p.level.ClampPos(coords);
+            coords = startingLevel.ClampPos(coords);
             
-            p.level.SetBlock(       (ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
-            p.level.BroadcastChange((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
+            startingLevel.SetBlock(       (ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
+            startingLevel.BroadcastChange((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
             
         }
     }
@@ -2353,6 +2368,29 @@ namespace PluginCCS {
         }
     }
     
+    public static class CommandParser2 {
+        /// <summary> Attempts to parse the 3 given arguments as coordinates. </summary>
+        public static bool GetCoords(Player p, string[] args, int argsOffset, ref Vec3F32 P) {
+            return
+                GetCoord(p, args[argsOffset + 0], "X coordinate", ref P.X) &&
+                GetCoord(p, args[argsOffset + 1], "Y coordinate", ref P.Y) &&
+                GetCoord(p, args[argsOffset + 2], "Z coordinate", ref P.Z);
+        }
+        
+        static bool GetCoord(Player p, string arg, string axis, ref float value) {
+            bool relative = arg.Length > 0 && arg[0] == '~';
+            if (relative) arg = arg.Substring(1);
+            // ~ should work as ~0
+            if (relative && arg.Length == 0) return true;
+            
+            float cur = value;
+            value   = 0;
+            
+            if (!CommandParser.GetReal(p, arg, axis, ref value)) return false;
+            if (relative) value += cur;
+            return true;
+        }
+    }
     
     
 }
