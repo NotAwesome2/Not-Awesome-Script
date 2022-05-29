@@ -598,6 +598,7 @@ namespace PluginCCS {
             
             OnPlayerFinishConnectingEvent.Register(OnPlayerFinishConnecting, Priority.High);
             OnInfoSwapEvent.Register(OnInfoSwap, Priority.Low);
+            OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
             OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
             OnPlayerChatEvent.Register(RightBeforeChat, Priority.High);
@@ -624,6 +625,7 @@ namespace PluginCCS {
             
             OnPlayerFinishConnectingEvent.Unregister(OnPlayerFinishConnecting);
             OnInfoSwapEvent.Unregister(OnInfoSwap);
+            OnJoiningLevelEvent.Unregister(OnJoiningLevel);
             OnJoinedLevelEvent.Unregister(OnJoinedLevel);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
             OnPlayerChatEvent.Unregister(RightBeforeChat);
@@ -663,6 +665,18 @@ namespace PluginCCS {
             data.Dispose();
             scriptDataAtPlayer.Remove(p.name);
         }
+		static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
+            string filePath = Script.scriptPath+lvl.name+Script.extension; if(!File.Exists(filePath)) { return; }
+            
+            CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
+            ScriptData scriptData = Core.GetScriptData(p);
+            scriptData.SetString("denyAccess", "", false, lvl.name);
+            Command.Find("script").Use(p, lvl.name+" #accessControl", data2); //not using p.HandleCommand because it needs to all be in one thread
+            
+            if (scriptData.GetString("denyAccess", false, lvl.name).ToLower() == "true") {
+                canJoin = false;
+            }
+		}
         static void OnJoinedLevel(Player p, Level prevLevel, Level level, ref bool announce) {
             //clear all 6 CPE message lines
             for (int i = 1; i < 7; i++) {
@@ -1076,7 +1090,7 @@ namespace PluginCCS {
     }
     //Fields
     public partial class Script {
-        public const string extension = ".nas";
+        public const string extension = ".nas"; //this is duplicated in Cmdinput.cs
         const CpeMessageType bot1 = CpeMessageType.BottomRight3;
         const CpeMessageType bot2 = CpeMessageType.BottomRight2;
         const CpeMessageType bot3 = CpeMessageType.BottomRight1;
@@ -1117,7 +1131,7 @@ namespace PluginCCS {
         public List<ScriptLine> scriptActions = new List<ScriptLine>();
         public int lineNumber = -1;
         public Dictionary<string, int> Labels = new Dictionary<string, int>();
-        public const string scriptPath = "scripts/";
+        public const string scriptPath = "scripts/"; //this is duplicated in Cmdinput.cs
         public bool hasCef = false;
         public int amountOfCharsInLastMessage = 0;
         public string[] runArgs;
@@ -1296,6 +1310,9 @@ namespace PluginCCS {
                     p.Message("%T/Input &Sis not used in {0}.", p.level.name);
                     return;
                 }
+                if (startLabel == "#accessControl") {
+                    return;
+                }
                 p.Message("&cScript error: unknown starting label \"" + startLabel + "\".");
                 p.Message(CmdScript.labelHelp);
                 return;
@@ -1311,6 +1328,10 @@ namespace PluginCCS {
             if (p.appName != null && p.appName.CaselessContains("mobile") || p.appName.CaselessContains("android")) {
                 SetString("mobile", "true");
             }
+            if (p.appName != null && p.appName.CaselessContains("web")) {
+                SetString("webclient", "true");
+            }
+            
             SetString("msgdelaymultiplier", "64");
             
             ScriptLine lastAction = new ScriptLine();
@@ -1353,6 +1374,7 @@ namespace PluginCCS {
                 int limit = isOS ? actionLimitOS : actionLimit;
                 if (actionCounter > limit) {
                     p.Message("&cScript error: Over {0} actions have been performed! Assuming endless loop and aborting.", limit);
+                    p.Message("&cLast line number ran was: {0}", lineNumber);
                     break;
                 }
             }
