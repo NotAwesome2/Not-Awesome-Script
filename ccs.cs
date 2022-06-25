@@ -675,6 +675,7 @@ namespace PluginCCS {
             
             if (scriptData.GetString("denyAccess", false, lvl.name).ToLower() == "true") {
                 canJoin = false;
+                lvl.AutoUnload();
             }
 		}
         static void OnJoinedLevel(Player p, Level prevLevel, Level level, ref bool announce) {
@@ -737,7 +738,7 @@ namespace PluginCCS {
             if (notifyPlayer) { CmdReplyTwo.SetUpDone(p); }
         }
         
-        void OnPlayerMove(Player p, Position next, byte yaw, byte pitch) {
+        void OnPlayerMove(Player p, Position next, byte yaw, byte pitch, ref bool cancel) {
             ScriptData scriptData = GetScriptData(p); if (scriptData == null) { return; }
             if (scriptData.stareCoords != null) {
                 Script.LookAtCoords(p, (Vec3S32)scriptData.stareCoords);
