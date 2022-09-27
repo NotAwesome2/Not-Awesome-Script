@@ -518,7 +518,7 @@ namespace PluginCCS {
             HttpUtil.FilterURL(ref message);
             string fileName = p.level.name.ToLower() + Script.extension;
             try {
-                new WebClient().DownloadFile(message, Script.scriptPath+"os/" + fileName);
+                new WebClient().DownloadFile(message, Script.scriptPathOS + fileName);
             } catch (IOException e) {
                 p.Kick("Stop spamming script!! ({0})", e.Message);
                 return;
@@ -574,6 +574,9 @@ namespace PluginCCS {
         public static Command tp;
         
         public override void Load(bool startup) {
+            
+            Directory.CreateDirectory(Script.scriptPath);
+            Directory.CreateDirectory(Script.scriptPathOS);
             
             tempBlockCmd      = new CmdTempBlock();
             tempChunkCmd      = new CmdTempChunk();
@@ -706,8 +709,8 @@ namespace PluginCCS {
         }
         
         static void OnLevelRenamed(string srcMap, string dstMap) {
-            string srcPath = Script.scriptPath+"/os/"+srcMap+Script.extension;
-            string dstPath = Script.scriptPath+"/os/"+dstMap+Script.extension;
+            string srcPath = Script.scriptPathOS+srcMap+Script.extension;
+            string dstPath = Script.scriptPathOS+dstMap+Script.extension;
             if (!File.Exists(srcPath)) { return; }
             File.Move(srcPath, dstPath);
         }
@@ -889,7 +892,8 @@ namespace PluginCCS {
                 if (line.Length == 0 || line.StartsWith("//")) continue;
                 
                 if (line[0] == '#') {
-                    if (script.Labels.ContainsKey(line)) { p.Message("&cError when compiling script on line "+lineNumber+": duplicate label \"" + line + "\" detected."); return null; }
+                    if (line.Contains('|')) { p.Message("&cError when compiling script on line "+lineNumber+": Declaring labels with pipe character | is not allowed."); return null; }
+                    if (script.Labels.ContainsKey(line)) { p.Message("&cError when compiling script on line "+lineNumber+": Duplicate label \"" + line + "\" detected."); return null; }
                     script.Labels[line] = script.scriptActions.Count;
                 }
                 else {
@@ -1058,6 +1062,9 @@ namespace PluginCCS {
                           case "placeblock":
                               scriptLine.actionType = Script.ActionType.PlaceBlock;
                               break;
+                          //case "setblockpermission":
+                          //    scriptLine.actionType = Script.ActionType.SetBlockPermission;
+                              break;
                           default:
                               p.Message("&cError when compiling script on line "+lineNumber+": unknown Action \"" + actionType + "\" detected.");
                               return null;
@@ -1082,7 +1089,7 @@ namespace PluginCCS {
         }
         
         public string[] GetLines() {
-            string filePath = isOS ? scriptPath+"os/"+scriptName : scriptPath+scriptName;
+            string filePath = isOS ? scriptPathOS+scriptName : scriptPath+scriptName;
             filePath += extension;
             string[] lines = new string[] {};
             if(File.Exists(filePath)) { lines = File.ReadAllLines( filePath ); }
@@ -1133,6 +1140,7 @@ namespace PluginCCS {
         public int lineNumber = -1;
         public Dictionary<string, int> Labels = new Dictionary<string, int>();
         public const string scriptPath = "scripts/"; //this is duplicated in Cmdinput.cs
+        public const string scriptPathOS = scriptPath+"os/";
         public bool hasCef = false;
         public int amountOfCharsInLastMessage = 0;
         public string[] runArgs;
@@ -1175,7 +1183,7 @@ namespace PluginCCS {
             }
             if (prop.CaselessEq("weather")) {
                 type = GetEnvWeatherType(valueString);
-                if (type != null) { p.Send(Packet.EnvWeatherType((byte)type)); return; }
+                if (type != null) { p.Session.SendSetWeather((byte)type); return; }
                 Error(); p.Message("&cEnv weather type \"{0}\" is not currently supported.", valueString);
                 return;
             }
@@ -1590,7 +1598,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock
+            DefineHotkey, UndefineHotkey, PlaceBlock, SetBlockPermission
             };
         }
         public enum ActionType : int {
@@ -1599,7 +1607,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock
+            DefineHotkey, UndefineHotkey, PlaceBlock, SetBlockPermission
         }
         public ScriptAction[] Actions;
         
@@ -1727,7 +1735,6 @@ namespace PluginCCS {
             SetDouble(bits[0], Core.RandomRangeDouble(min, max));
         }
         public void SetRandList() {
-            string[] bits = args.SplitSpaces(2);
             if (cmdArgs == "") { Error(); p.Message("SetRandList requires a list of values to choose from separated by the | character."); return; }
             SetString(cmdName, Core.RandomEntry(cmdArgs.Split(Core.pipeChar)));
         }
@@ -1760,9 +1767,15 @@ namespace PluginCCS {
             if (!repeatable) p.Extras[thisBool] = false;
         }
         public void Show() {
+            ScriptData data = Core.GetScriptData(p);
+            
+            if (args.CaselessEq("every single package")) {
+                data.ShowAllStrings();
+                return;
+            }
             string[] values = args.SplitSpaces();
             bool saved;
-            ScriptData data = Core.GetScriptData(p);
+            
             foreach (string value in values) {
                 p.Message("The value of &b{0} &Sis \"&o{1}&S\".", data.ValidateStringName(value, isOS, scriptName, out saved), GetString(value));
             }
@@ -1990,6 +2003,25 @@ namespace PluginCCS {
             startingLevel.BroadcastChange((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
             
         }
+        public void SetBlockPermission() {
+            
+            //  setblockpermission [block ID] [buildable] [deletable]
+            //      Sets both buildable and deletable of the given block ID.
+            //      For example:
+            //          setblockpermission 1 true true
+            //      Sets stone to be both buildable and deletable. You must include all 3 arguments each time.
+            
+            string[] bits = args.SplitSpaces();
+            if (bits.Length != 3) { Error(); p.Message("&cYou must specify a block ID, buildable, and deletable."); return; }
+            bool buildable = false; bool deletable = false;
+            int clientBlockID = 0;
+            
+            if (!CommandParser.GetInt (p, bits[0], "block ID" , ref clientBlockID, 0, 767)) { Error(true); return; }
+            if (!CommandParser.GetBool(p, bits[1],              ref buildable            )) { Error(true); return; }
+            if (!CommandParser.GetBool(p, bits[2],              ref deletable            )) { Error(true); return; }
+            
+            p.Send(Packet.BlockPermission((BlockID)clientBlockID, buildable, deletable, p.Session.hasExtBlocks));
+        }
     }
     
     
@@ -2032,7 +2064,14 @@ namespace PluginCCS {
         private Dictionary<string, string> strings = new Dictionary<string, string>();
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
         private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
-
+        
+        public void ShowAllStrings() {
+            if (strings.Count == 0) { p.Message("There are no packages to show"); return; }
+            foreach (var pair in strings) {
+                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", pair.Key, pair.Value);
+            }
+        }
+        
         
         public Hotkeys hotkeys;
         
