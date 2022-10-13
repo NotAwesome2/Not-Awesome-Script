@@ -1062,8 +1062,8 @@ namespace PluginCCS {
                           case "placeblock":
                               scriptLine.actionType = Script.ActionType.PlaceBlock;
                               break;
-                          //case "setblockpermission":
-                          //    scriptLine.actionType = Script.ActionType.SetBlockPermission;
+                          case "changemodel":
+                              scriptLine.actionType = Script.ActionType.ChangeModel;
                               break;
                           default:
                               p.Message("&cError when compiling script on line "+lineNumber+": unknown Action \"" + actionType + "\" detected.");
@@ -1341,7 +1341,7 @@ namespace PluginCCS {
                 SetString("webclient", "true");
             }
             
-            SetString("msgdelaymultiplier", "64");
+            SetString("msgdelaymultiplier", "50");
             
             ScriptLine lastAction = new ScriptLine();
             lastAction.actionType = Script.ActionType.None;
@@ -1598,7 +1598,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock, SetBlockPermission
+            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel
             };
         }
         public enum ActionType : int {
@@ -1607,7 +1607,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock, SetBlockPermission
+            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel
         }
         public ScriptAction[] Actions;
         
@@ -1714,7 +1714,13 @@ namespace PluginCCS {
             SetArithmeticOp((a,b) => { if (b == 0) throw new DivideByZeroException(); return a / b; });
         }
         public void SetMod() {
-            SetArithmeticOp((a,b) => { if (b == 0) throw new DivideByZeroException(); return a % b; });
+            SetArithmeticOp((a,b) => {
+                if (b == 0) throw new DivideByZeroException();
+                
+                //https://stackoverflow.com/questions/1082917/mod-of-negative-number-is-melting-my-brain
+                double r = a % b;
+                return r < 0 ? r + b : r;
+                });
         }
         public void SetRandRange() {
             string[] bits = args.SplitSpaces();
@@ -1826,7 +1832,8 @@ namespace PluginCCS {
             if (data.customMOTD != null) {
                 SendMOTD(data.customMOTD);
             } else {
-                p.SendMapMotd();
+                // do not use p.SendMapMotd() because it triggers the event which makes locked model update, which we don't want
+                p.Send(Packet.Motd(p, p.GetMotd()));
             }
         }
         bool GetCoords(string actionName, out Vec3S32 coords) {
@@ -1861,7 +1868,12 @@ namespace PluginCCS {
         }
         public void MOTD() {
             ScriptData data = Core.GetScriptData(p);
-            if (args.CaselessEq("ignore")) { data.customMOTD = null; p.SendMapMotd(); return; }
+            if (args.CaselessEq("ignore")) {
+                data.customMOTD = null;
+                // do not use p.SendMapMotd() because it triggers the event which makes locked model update, which we don't want
+                p.Send(Packet.Motd(p, p.GetMotd()));
+                return;
+            }
             
             data.customMOTD = args;
             SendMOTD(data.customMOTD);
@@ -2003,24 +2015,38 @@ namespace PluginCCS {
             startingLevel.BroadcastChange((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z, block);
             
         }
-        public void SetBlockPermission() {
+        public void ChangeModel() {
+            ScriptData scriptData = Core.GetScriptData(p);
+            if (cmdName == "") {
+                if (scriptData.oldModel != null) {
+                    p.UpdateModel(scriptData.oldModel);
+                }
+                return;
+            }
+            string[] models = GetLockedModels(p.GetMotd());
+            if (models == null) {
+                p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD."); return;
+            }
+            scriptData.oldModel = p.Model;
+            scriptData.newModel = cmdName;
+            p.UpdateModel(cmdName);
+        }
+        
+        // copy pasted from lockedmodel.cs plugin
+        static char[] splitChars = new char[] { ',' };
+        static string[] GetLockedModels(string motd) {
+            // Does the motd have 'model=' in it?
+            int index = motd.IndexOf("model=");
+            if (index == -1) return null;
+            motd = motd.Substring(index + "model=".Length);
             
-            //  setblockpermission [block ID] [buildable] [deletable]
-            //      Sets both buildable and deletable of the given block ID.
-            //      For example:
-            //          setblockpermission 1 true true
-            //      Sets stone to be both buildable and deletable. You must include all 3 arguments each time.
+            // Get the single word after 'model='
+            if (motd.IndexOf(' ') >= 0)
+                motd = motd.Substring(0, motd.IndexOf(' '));
             
-            string[] bits = args.SplitSpaces();
-            if (bits.Length != 3) { Error(); p.Message("&cYou must specify a block ID, buildable, and deletable."); return; }
-            bool buildable = false; bool deletable = false;
-            int clientBlockID = 0;
-            
-            if (!CommandParser.GetInt (p, bits[0], "block ID" , ref clientBlockID, 0, 767)) { Error(true); return; }
-            if (!CommandParser.GetBool(p, bits[1],              ref buildable            )) { Error(true); return; }
-            if (!CommandParser.GetBool(p, bits[2],              ref deletable            )) { Error(true); return; }
-            
-            p.Send(Packet.BlockPermission((BlockID)clientBlockID, buildable, deletable, p.Session.hasExtBlocks));
+            // Is there an actual word after 'model='?
+            if (motd.Length == 0) return null;
+            return motd.Split(splitChars);
         }
     }
     
@@ -2060,6 +2086,9 @@ namespace PluginCCS {
         public string customMOTD = null;
         public Vec3S32? stareCoords = null;
         public ReplyData[] replies = new ReplyData[CmdReplyTwo.maxReplyCount];
+        
+        public string oldModel = null;
+        public string newModel = null;
         
         private Dictionary<string, string> strings = new Dictionary<string, string>();
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
