@@ -2025,10 +2025,15 @@ namespace PluginCCS {
             }
             string[] models = GetLockedModels(p.GetMotd());
             if (models == null) {
-                p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD."); return;
+                //p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
+                return;
             }
+            //don't let them change twice to same model otherwise revert doesnt work
+            if (p.Model.CaselessEq(cmdName)) { return; }
+            
             scriptData.oldModel = p.Model;
             scriptData.newModel = cmdName;
+            
             p.UpdateModel(cmdName);
         }
         
@@ -2145,6 +2150,8 @@ namespace PluginCCS {
             frozen = false;
             stareCoords = null;
             Reset(true, true, "");
+            oldModel = null;
+            newModel = null;
             hotkeys.UndefineAll();
             customMOTD = null;
         }
@@ -2201,8 +2208,8 @@ namespace PluginCCS {
         }
         
         ///in OS, strings are never saved.
-        ///in mod, strings are saved if they end with a period. Saved strings are always prefixed with the @levelname_
-        ///if they aren't prefixed with the level name, it is automatically added
+        ///in mod, strings are saved if they end with a period. Saved strings are always prefixed with the @scriptname_
+        ///if they aren't prefixed with the script name, it is automatically added
         ///e.g. @egg2021_eggCount.
         public string ValidateStringName(string stringName, bool isOS, string scriptName, out bool saved) {
             saved = false;
