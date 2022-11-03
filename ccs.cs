@@ -605,7 +605,7 @@ namespace PluginCCS {
             OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
             OnPlayerChatEvent.Register(RightBeforeChat, Priority.High);
-            
+            OnPlayerCommandEvent.Register(OnPlayerCommand, Priority.High);
             
             OnPlayerDisconnectEvent.Register(OnPlayerDisconnect, Priority.Low);
             
@@ -632,9 +632,12 @@ namespace PluginCCS {
             OnJoinedLevelEvent.Unregister(OnJoinedLevel);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
             OnPlayerChatEvent.Unregister(RightBeforeChat);
-            OnPlayerMoveEvent.Unregister(OnPlayerMove);
+            OnPlayerCommandEvent.Unregister(OnPlayerCommand);
             
             OnPlayerDisconnectEvent.Unregister(OnPlayerDisconnect);
+            
+            OnPlayerMoveEvent.Unregister(OnPlayerMove);
+            
             
             //TODO: make script data persist between plugin reloads
             scriptDataAtPlayer.Clear();
@@ -739,6 +742,47 @@ namespace PluginCCS {
             }
             //notify player how to reply if they don't choose one and one is available
             if (notifyPlayer) { CmdReplyTwo.SetUpDone(p); }
+        }
+        
+        void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
+            string calledLabel;
+            bool async;
+                 if (cmd.CaselessEq("input"))      { calledLabel = "#input";      async = false; }
+            else if (cmd.CaselessEq("inputAsync")) { calledLabel = "#inputAsync"; async = true; }
+            else { return; }
+            
+            string scriptCmdName;
+            string scriptFile = "scripts/";
+            if (p.level.name.Contains("+")) { //assume os script
+                scriptCmdName = osRunscriptCmd.name;
+                scriptFile = scriptFile + "os/";
+            } else {
+                scriptCmdName = runscriptCmd.name;
+            }
+            
+            scriptFile = scriptFile + p.level.name + ".nas";
+            if (!File.Exists(scriptFile)) {
+                //This message can't show up anymore because we need to let Cmdinput run for old maps if this event doesn't trigger anything
+                //p.Message("%T/Input &Sis not used in {0}.", p.level.name);
+                
+                //don't want to show "unknown command" message
+                if (async) { p.cancelcommand = true; }
+                return;
+            }
+            
+            string[] runArgs = message.SplitSpaces(2);
+            string runArg1 = runArgs[0];
+            string runArg2 = runArgs.Length > 1 ? runArgs[1] : "";
+            runArg1 = runArg1.Replace(" ", "_");
+            runArg2 = runArg2.Replace(" ", "_");
+            string args = calledLabel+"|"+runArg1+"|"+runArg2;
+            if (async) { args = args+" repeatable"; }
+            
+            data.Context = CommandContext.MessageBlock;
+            p.HandleCommand(scriptCmdName, args, data);
+            
+            // this must be placed after HandleCommand because it runs GetCommand which sets p.cancelcommand back to true
+            p.cancelcommand = true;
         }
         
         void OnPlayerMove(Player p, Position next, byte yaw, byte pitch, ref bool cancel) {
@@ -1967,19 +2011,19 @@ namespace PluginCCS {
             
             string content = bits[0];
             int keyCode = scriptData.hotkeys.GetKeyCode(bits[1]);
-            string modifierArgs = bits.Length > 2 ? bits[2].ToLower() : "";
-            
             if (keyCode == 0) { Error(true); return; }
+            string modifierArgs = bits.Length > 2 ? bits[2].ToLower() : "";
+            byte modifiers = Hotkeys.GetModifiers(modifierArgs);
+            bool repeatable = modifierArgs.Contains("async");
             
-            string action = Hotkeys.FullAction(content);
+            
+            string action = Hotkeys.FullAction(content, repeatable);
             if (action.Length > NetUtils.StringSize) {
                 Error();
                 p.Message("&cThe hotkey that script is trying to send (&7{0}&c) is &e{1}&c characters long, but can only be &a{2}&c at most.", action, action.Length, NetUtils.StringSize);
                 p.Message("You can remove &a{0}&S or more characters to fix this error.", action.Length - NetUtils.StringSize);
                 return;
             }
-            
-            byte modifiers = Hotkeys.GetModifiers(modifierArgs);
             scriptData.hotkeys.Define(action, keyCode, modifiers);
         }
         public void UndefineHotkey() {
@@ -2418,8 +2462,9 @@ namespace PluginCCS {
             { "SLEEP",        223 }
         };
         
-        public static string FullAction(string content) {
-            return "/input "+content+"◙";
+        public static string FullAction(string content, bool repeatable) {
+            string cmd = repeatable ? "inputAsync" : "input";
+            return "/"+cmd+" "+content+"◙";
         }
         public static byte GetModifiers(string modifierArgs) {
             byte ctrlFlag  = (byte)(modifierArgs.Contains("ctrl")  ? 1 : 0);
