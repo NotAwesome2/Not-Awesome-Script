@@ -568,6 +568,7 @@ namespace PluginCCS {
         public static Command dropCmd;
         public static Command runscriptCmd;
         public static Command osRunscriptCmd;
+        public static Command debugScriptCmd;
         public static Command replyCmd;
         public static Command itemsCmd;
         public static Command updateOsScriptCmd;
@@ -584,6 +585,7 @@ namespace PluginCCS {
             dropCmd           = new CmdDrop();
             runscriptCmd      = new CmdScript();
             osRunscriptCmd    = new CmdOsScript();
+            debugScriptCmd    = new CmdDebugScript();
             replyCmd          = new CmdReplyTwo();
             itemsCmd          = new CmdItems();
             updateOsScriptCmd = new CmdUpdateOsScript();
@@ -595,6 +597,7 @@ namespace PluginCCS {
             Command.Register(dropCmd);
             Command.Register(runscriptCmd);
             Command.Register(osRunscriptCmd);
+            Command.Register(debugScriptCmd);
             Command.Register(replyCmd);
             Command.Register(itemsCmd);
             Command.Register(updateOsScriptCmd);
@@ -622,6 +625,7 @@ namespace PluginCCS {
             Command.Unregister(dropCmd);
             Command.Unregister(runscriptCmd);
             Command.Unregister(osRunscriptCmd);
+            Command.Unregister(debugScriptCmd);
             Command.Unregister(replyCmd);
             Command.Unregister(itemsCmd);
             Command.Unregister(updateOsScriptCmd);
@@ -905,6 +909,41 @@ namespace PluginCCS {
             CmdScript.HelpBody(p);
         }
     }
+    public class CmdDebugScript : Command2 {
+        public override string name { get { return "DebugScript"; } }
+        public override string shortcut { get { return ""; } }
+        public override bool MessageBlockRestricted { get { return true; } }
+        public override string type { get { return "other"; } }
+        public override bool museumUsable { get { return false; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Admin; } }
+        public override bool UpdatesLastCmd { get { return false; } }
+        
+        public override void Use(Player p, string message, CommandData data) {
+            if ( !(LevelInfo.IsRealmOwner(p.name, p.level.name) || p.group.Permission >= LevelPermission.Operator) ) {
+                p.Message("You can only use %b/{0} %Sif you are the map owner.", name);
+                return;
+            }
+            
+            if (message.Length == 0) { Help(p); return; }
+            string[] args = message.SplitSpaces();
+            
+            bool debug = false;
+            int delay = 0;
+            if (!CommandParser.GetBool(p, args[0], ref debug)) { return; }
+            if (args.Length > 1 && !CommandParser.GetInt(p, args[1], "debug millisecond delay", ref delay, 0)) { return; }
+            
+            ScriptData scriptData = Core.GetScriptData(p);
+            scriptData.debugging = debug;
+            scriptData.debuggingDelay = delay;
+            p.Message("Script debugging mode is now {0}&S{1}", debug ? "&atrue" : "&cfalse", debug ? " with &b"+delay+"&S added delay." : "");
+        }
+        
+        public override void Help(Player p) {
+            p.Message("&T/DebugScript [true/false] <milliseconds>");
+            p.Message("&HStarts or stops script debugging mode");
+            p.Message("&HMakes script print every action it does to chat with optional added <milliseconds> delay after each action.");
+        }
+    }
     
     //Constructor
     public partial class Script {
@@ -913,6 +952,7 @@ namespace PluginCCS {
             Script script = new Script();
             
             script.p = p;
+            script.scriptData = Core.GetScriptData(script.p);
             script.startingLevel = p.level;
             script.startingLevelName = p.level.name;
             script.scriptName = scriptName;
@@ -1109,6 +1149,9 @@ namespace PluginCCS {
                           case "changemodel":
                               scriptLine.actionType = Script.ActionType.ChangeModel;
                               break;
+                          case "setdirvector":
+                              scriptLine.actionType = Script.ActionType.SetDirVector;
+                              break;
                           default:
                               p.Message("&cError when compiling script on line "+lineNumber+": unknown Action \"" + actionType + "\" detected.");
                               return null;
@@ -1164,6 +1207,7 @@ namespace PluginCCS {
         }
         
         public Player p;
+        public ScriptData scriptData;
         public Level startingLevel;
         public string startingLevelName;
         public string scriptName;
@@ -1349,7 +1393,6 @@ namespace PluginCCS {
     public partial class Script {
         
         public void Run(string startLabel, int newThreadNestLevel = 1) {
-            //Core.GetScriptData(p).Dispose(); //this was for testing
             
             actionCounter = 0;
             this.newThreadNestLevel = newThreadNestLevel;
@@ -1386,6 +1429,10 @@ namespace PluginCCS {
             }
             
             SetString("msgdelaymultiplier", "50");
+            
+            if (scriptData.debugging) {
+                p.Message("&lDebug: &6starting {0} at {1}", scriptName, startLabel);
+            }
             
             ScriptLine lastAction = new ScriptLine();
             lastAction.actionType = Script.ActionType.None;
@@ -1441,11 +1488,10 @@ namespace PluginCCS {
             
             string parsedConditionArgs = ParseMessage(line.conditionArgs);
             bool doAction = false;
-            ScriptData data = Core.GetScriptData(p);
             
             //handle item
             if (line.conditionType == ScriptLine.ConditionType.Item) {
-                doAction = data.HasItem(parsedConditionArgs, isOS);
+                doAction = scriptData.HasItem(parsedConditionArgs, isOS);
                 goto end;
             }
             
@@ -1505,8 +1551,15 @@ namespace PluginCCS {
             cmdName = bits[0];
             cmdArgs = bits.Length > 1 ? bits[1] : "";
             
+            if (scriptData.debugging) {
+                p.Message("&lDebug: {0}", line.actionType.ToString());
+                
+                if (line.actionArgs != args) { p.Message("  {0}", line.actionArgs); }
+                                               p.Message("  {0}", args);
+            }
             Actions[(int)line.actionType]();
             
+            if (scriptData.debugging && scriptData.debuggingDelay > 0) { Thread.Sleep(scriptData.debuggingDelay); }
         }
         
         public bool GetDouble(string valName, out double doubleValue, bool throwError = true) {
@@ -1522,6 +1575,7 @@ namespace PluginCCS {
         public void SetDouble(string valName, double value) {
             SetString(valName, value.ToString());
         }
+        
         public string GetString(string stringName) {
             if (p == null) { throw new System.Exception("Player null in GetString new pdb pls"); }
             
@@ -1543,6 +1597,7 @@ namespace PluginCCS {
             if (stringName.CaselessEq("playerpz"))    { return p.Pos.Z.ToString(); }
             if (stringName.CaselessEq("playeryaw"))   { return Orientation.PackedToDegrees(p.Rot.RotY).ToString();  } //yaw
             if (stringName.CaselessEq("playerpitch")) { return Orientation.PackedToDegrees(p.Rot.HeadX).ToString(); } //pitch
+            
             if (stringName.CaselessEq("msgdelay")) {
                 double msgDelayMultiplier = 0;
                 double.TryParse(GetString("msgDelayMultiplier"), out msgDelayMultiplier);
@@ -1569,10 +1624,10 @@ namespace PluginCCS {
             
             if (stringName.CaselessEq("epochMS")) { return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(); }
             
-            return Core.GetScriptData(p).GetString(stringName, isOS, scriptName);
+            return scriptData.GetString(stringName, isOS, scriptName);
         }
         public void SetString(string stringName, string value) {
-            Core.GetScriptData(p).SetString(stringName, value, isOS, scriptName);
+            scriptData.SetString(stringName, value, isOS, scriptName);
         }
         
         public const char beginParseSymbol = '{';
@@ -1642,7 +1697,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel
+            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector
             };
         }
         public enum ActionType : int {
@@ -1651,7 +1706,7 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel
+            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector
         }
         public ScriptAction[] Actions;
         
@@ -1817,17 +1872,15 @@ namespace PluginCCS {
             if (!repeatable) p.Extras[thisBool] = false;
         }
         public void Show() {
-            ScriptData data = Core.GetScriptData(p);
-            
             if (args.CaselessEq("every single package")) {
-                data.ShowAllStrings();
+                scriptData.ShowAllStrings();
                 return;
             }
             string[] values = args.SplitSpaces();
             bool saved;
             
             foreach (string value in values) {
-                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", data.ValidateStringName(value, isOS, scriptName, out saved), GetString(value));
+                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", scriptData.ValidateStringName(value, isOS, scriptName, out saved), GetString(value));
             }
         }
         public void Kill() {
@@ -1842,7 +1895,6 @@ namespace PluginCCS {
             DoCmd(cmd, cmdArgs);
         }
         public void ResetData() {
-            ScriptData scriptData = Core.GetScriptData(p);
             if (cmdName.CaselessStarts("packages")) {
                 scriptData.Reset(true, false, cmdArgs);
                 return;
@@ -1861,20 +1913,18 @@ namespace PluginCCS {
         }
         public void Item() {
             if (cmdArgs == "") { Error(); p.Message("&cNot enough arguments for Item action"); return; }
-            ScriptData scriptData = Core.GetScriptData(p);
             if (cmdName == "get" || cmdName == "give")    { scriptData.GiveItem(cmdArgs, isOS); return; }
             if (cmdName == "take" || cmdName == "remove") { scriptData.TakeItem(cmdArgs, isOS); return; } 
             Error(); p.Message("&cUnknown function for Item action: \"{0}\"", cmdName);
         }
         public void Freeze() {
-            Core.GetScriptData(p).frozen = true;
+            scriptData.frozen = true;
             p.Send(Packet.Motd(p, "-hax horspeed=0.000001 jumps=0 -push"));
         }
         public void Unfreeze() {
-            ScriptData data = Core.GetScriptData(p);
-            data.frozen = false;
-            if (data.customMOTD != null) {
-                SendMOTD(data.customMOTD);
+            scriptData.frozen = false;
+            if (scriptData.customMOTD != null) {
+                SendMOTD(scriptData.customMOTD);
             } else {
                 // do not use p.SendMapMotd() because it triggers the event which makes locked model update, which we don't want
                 p.Send(Packet.Motd(p, p.GetMotd()));
@@ -1900,7 +1950,6 @@ namespace PluginCCS {
             LookAtCoords(p, coords);
         }
         public void Stare() {
-            ScriptData scriptData = Core.GetScriptData(p);
             if (args == "") { scriptData.stareCoords = null; return; }
             
             Vec3S32 coords;
@@ -1911,16 +1960,15 @@ namespace PluginCCS {
             SetEnv(args);
         }
         public void MOTD() {
-            ScriptData data = Core.GetScriptData(p);
             if (args.CaselessEq("ignore")) {
-                data.customMOTD = null;
+                scriptData.customMOTD = null;
                 // do not use p.SendMapMotd() because it triggers the event which makes locked model update, which we don't want
                 p.Send(Packet.Motd(p, p.GetMotd()));
                 return;
             }
             
-            data.customMOTD = args;
-            SendMOTD(data.customMOTD);
+            scriptData.customMOTD = args;
+            SendMOTD(scriptData.customMOTD);
         }
         public void SendMOTD(string motd) {
             p.Send(Packet.Motd(p, motd));
@@ -1954,7 +2002,6 @@ namespace PluginCCS {
             ReplyCore(false);
         }
         void ReplyCore(bool notifyPlayer) {
-            ScriptData scriptData = Core.GetScriptData(p);
             if (cmdName.CaselessEq("clear")) { scriptData.ResetReplies(); return; }
             //reply 1|You: Sure thing.|#replyYes
             //reply 2|You: No thanks.|#replyNo
@@ -2007,8 +2054,6 @@ namespace PluginCCS {
             string[] bits = args.Split(Core.pipeChar);
             if (bits.Length < 2) { Error(); p.Message("&cNot enough arguments to define a hotkey: \"" + args + "\"."); return; }
             
-            ScriptData scriptData = Core.GetScriptData(p);
-            
             string content = bits[0];
             int keyCode = scriptData.hotkeys.GetKeyCode(bits[1]);
             if (keyCode == 0) { Error(true); return; }
@@ -2028,7 +2073,6 @@ namespace PluginCCS {
         }
         public void UndefineHotkey() {
             string[] bits = args.Split(Core.pipeChar);
-            ScriptData scriptData = Core.GetScriptData(p);
             int keyCode = scriptData.hotkeys.GetKeyCode(bits[0]); if (keyCode == 0) { Error(true); return; }
             
             byte modifiers = 0;
@@ -2060,7 +2104,6 @@ namespace PluginCCS {
             
         }
         public void ChangeModel() {
-            ScriptData scriptData = Core.GetScriptData(p);
             if (cmdName == "") {
                 if (scriptData.oldModel != null) {
                     p.UpdateModel(scriptData.oldModel);
@@ -2081,6 +2124,32 @@ namespace PluginCCS {
             p.UpdateModel(cmdName);
         }
         
+        const string doubleToFourDecimalPlaces = "0.#####";
+        public void SetDirVector() {
+            string[] argBits = args.SplitSpaces();
+            if (argBits.Length < 5) { Error(); p.Message("&cNot enough arguments for setdirvector (expected 5)"); return; }
+            string xResult = argBits[0];
+            string yResult = argBits[1];
+            string zResult = argBits[2];
+            double yaw;
+            if (!GetDoubleRawOrVal(argBits[3], "setdirvector", out yaw)) { return; }
+            double pitch;
+            if (!GetDoubleRawOrVal(argBits[4], "setdirvector", out pitch)) { return; }
+            double yawRad   =   yaw * (Math.PI / 180.0f);
+            double pitchRad = pitch * (Math.PI / 180.0f);
+            
+            Vec3F32 dir = GetDirVector(yawRad, pitchRad);
+            SetString(xResult, dir.X.ToString(doubleToFourDecimalPlaces));
+            SetString(yResult, dir.Y.ToString(doubleToFourDecimalPlaces));
+            SetString(zResult, dir.Z.ToString(doubleToFourDecimalPlaces));
+        }
+        //copy pasted from DirUtils.cs. why have you abandoned me Unk
+        static Vec3F32 GetDirVector(double yaw, double pitch) {
+            double x =  Math.Sin(yaw) * Math.Cos(pitch);
+            double y = -Math.Sin(pitch);
+            double z = -Math.Cos(yaw) * Math.Cos(pitch);
+            return new Vec3F32((float)x, (float)y, (float)z);
+        }
         // copy pasted from lockedmodel.cs plugin
         static char[] splitChars = new char[] { ',' };
         static string[] GetLockedModels(string motd) {
@@ -2143,6 +2212,9 @@ namespace PluginCCS {
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
         private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
         
+        public bool debugging = false;
+        public int debuggingDelay = 0;
+        
         public void ShowAllStrings() {
             if (strings.Count == 0) { p.Message("There are no packages to show"); return; }
             foreach (var pair in strings) {
@@ -2190,6 +2262,12 @@ namespace PluginCCS {
             hotkeys.UpdatePlayerReference(p);
         }
         public void OnJoinedLevel() {
+            
+            if (debugging) p.Message("Script debugging mode is now &cfalse&S.");
+            debugging = false;
+            debuggingDelay = 0;
+            
+            
             SetRepliesNull();
             frozen = false;
             stareCoords = null;
