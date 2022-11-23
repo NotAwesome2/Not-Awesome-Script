@@ -2,7 +2,7 @@
 Scripting plugin made for Not Awesome 2.
 
 
-The included .dll files must be placed next to MCGalaxy.exe before the plugin can be loaded. Before compiling, you should change the password "CHANGETHIS" otherwise anyone can give themselves any item if they know it. The password must be kept all caps (uppercase) to work properly.
+**Before the plugin can be loaded.**, The included .dll files must be placed next to MCGalaxy.exe, and the server must be restarted. Before compiling, **you should change the password** "CHANGETHIS" otherwise anyone can give themselves any item if they know it. The password must be kept all caps (uppercase) to work properly.
 
 Script files (.nas) should be placed in "scripts" folder, and "os" scripts (which can be automatically uploaded by players with /osus) are placed in "scripts/os" folder.
 
