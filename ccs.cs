@@ -515,15 +515,19 @@ namespace PluginCCS {
         public override void Use(Player p, string message, CommandData data) {
             if (!LevelInfo.IsRealmOwner(p.name, p.level.name)) { p.Message("You can only upload scripts to maps that you own."); return; }
             if (message.Length == 0) { p.Message("%cYou need to provide a url of the file that will be used as your map's script."); return; }
+            
             HttpUtil.FilterURL(ref message);
+            byte[] webData = HttpUtil.DownloadData(message, p); 
+            if (webData == null) { return; }
+            
             string fileName = p.level.name.ToLower() + Script.extension;
+            
             try {
-                new WebClient().DownloadFile(message, Script.scriptPathOS + fileName);
+                File.WriteAllBytes(Script.scriptPathOS + fileName, webData);
             } catch (IOException e) {
-                p.Kick("Stop spamming script!! ({0})", e.Message);
+                p.Message("Problem while saving script: ({0})", e.Message);
                 return;
             }
-                
             p.Message("Done! Uploaded %f"+fileName+" %Sfrom url "+message+"");
         }
         
