@@ -1421,14 +1421,14 @@ namespace PluginCCS {
             
             //if player has cef do:
             //bool cef true
-            if (p.appName != null && p.appName.Contains("+ cef")) {
+            if (p.Session.appName != null && p.Session.appName.Contains("+ cef")) {
                 hasCef = true;
                 SetString("cef", "true");
             }
-            if (p.appName != null && p.appName.CaselessContains("mobile") || p.appName.CaselessContains("android")) {
+            if (p.Session.appName != null && p.Session.appName.CaselessContains("mobile") || p.Session.appName.CaselessContains("android")) {
                 SetString("mobile", "true");
             }
-            if (p.appName != null && p.appName.CaselessContains("web")) {
+            if (p.Session.appName != null && p.Session.appName.CaselessContains("web")) {
                 SetString("webclient", "true");
             }
             
