@@ -549,7 +549,7 @@ namespace PluginCCS {
         
         private static Dictionary<string, ScriptData> scriptDataAtPlayer = new Dictionary<string, ScriptData>();
         public static ScriptData GetScriptData(Player p) {
-			lock (locker) { //only one thread should access this at a time
+            lock (locker) { //only one thread should access this at a time
                 ScriptData sd;
                 if (scriptDataAtPlayer.TryGetValue(p.name, out sd)) { return sd; }
                 else {
@@ -558,7 +558,7 @@ namespace PluginCCS {
                     scriptDataAtPlayer[p.name] = new ScriptData(p);
                     return scriptDataAtPlayer[p.name];
                 }
-			}
+            }
         }
         
         private static Random rnd = new Random();
@@ -689,7 +689,7 @@ namespace PluginCCS {
             data.Dispose();
             scriptDataAtPlayer.Remove(p.name);
         }
-		static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
+        static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             string filePath = Script.scriptPath+lvl.name+Script.extension; if(!File.Exists(filePath)) { return; }
             
             CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
@@ -701,7 +701,7 @@ namespace PluginCCS {
                 canJoin = false;
                 lvl.AutoUnload();
             }
-		}
+        }
         static void OnJoinedLevel(Player p, Level prevLevel, Level level, ref bool announce) {
             //clear all 6 CPE message lines
             for (int i = 1; i < 7; i++) {
