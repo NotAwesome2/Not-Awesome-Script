@@ -545,12 +545,20 @@ namespace PluginCCS {
         public override string name { get { return "ccs"; } }
         public override string MCGalaxy_Version { get { return "1.9.3.9"; } }
         
+        static readonly object locker = new object();
+        
         private static Dictionary<string, ScriptData> scriptDataAtPlayer = new Dictionary<string, ScriptData>();
         public static ScriptData GetScriptData(Player p) {
-            ScriptData sd;
-            if (scriptDataAtPlayer.TryGetValue(p.name, out sd)) { return sd; }
-            //throw new System.Exception("Tried to get script data for "+p.name+" but there was NOTHING there");
-            return null;
+			lock (locker) { //only one thread should access this at a time
+                ScriptData sd;
+                if (scriptDataAtPlayer.TryGetValue(p.name, out sd)) { return sd; }
+                else {
+                    //throw new System.Exception("Tried to get script data for "+p.name+" but there was NOTHING there");
+                    Logger.Log(LogType.SystemActivity, "ccs: This shouldn't happen, but; FAILED to GetScriptData for " + p.name+", returning a new one.");
+                    scriptDataAtPlayer[p.name] = new ScriptData(p);
+                    return scriptDataAtPlayer[p.name];
+                }
+			}
         }
         
         private static Random rnd = new Random();
@@ -654,13 +662,15 @@ namespace PluginCCS {
         static void OnPlayerFinishConnecting(Player p) {
             //Logger.Log(LogType.SystemActivity, "ccs CONECTING " + p.name + " : " + Environment.StackTrace);
             
-            if (scriptDataAtPlayer.ContainsKey(p.name)) {
-                //this happens when they Reconnect.
-                scriptDataAtPlayer[p.name].UpdatePlayerReference(p);
-                Logger.Log(LogType.SystemActivity, "ccs ScriptData already exists for player: " + p.name);
-                return;
+            lock (locker) { //only one thread should access this at a time
+                if (scriptDataAtPlayer.ContainsKey(p.name)) {
+                    //this happens when they Reconnect.
+                    scriptDataAtPlayer[p.name].UpdatePlayerReference(p);
+                    Logger.Log(LogType.SystemActivity, "ccs ScriptData already exists for player: " + p.name);
+                    return;
+                }
+                scriptDataAtPlayer[p.name] = new ScriptData(p);
             }
-            scriptDataAtPlayer[p.name] = new ScriptData(p);
         }
         static void OnPlayerDisconnect(Player p, string reason) {
             
