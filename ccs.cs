@@ -440,6 +440,8 @@ namespace PluginCCS {
         const CpeMessageType line5 = CpeMessageType.Status2;
         const CpeMessageType line6 = CpeMessageType.Status3;
         
+        public const Chat.PersistentMessage.Priority replyPriority = Chat.PersistentMessage.Priority.Highest;
+        
         public override void Use(Player p, string message, CommandData data)
         {
             if (message == "") { Help(p); return; }
@@ -703,10 +705,10 @@ namespace PluginCCS {
             }
         }
         static void OnJoinedLevel(Player p, Level prevLevel, Level level, ref bool announce) {
-            //clear all 6 CPE message lines
-            for (int i = 1; i < 7; i++) {
+            //clear all persistent chat lines at default priority
+            for (int i = 1; i < CmdReplyTwo.maxReplyCount+1; i++) {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
-                if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, ""); }
+                if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", Chat.PersistentMessage.Priority.Normal); }
             }
             ScriptData data;
             if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnJoinedLevel(); }
@@ -1733,7 +1735,7 @@ namespace PluginCCS {
         }
         public void CpeMessage() {
             if (cmdName == "") { Error(); p.Message("&cNot enough arguments for cpemsg"); return; }
-            p.SendCpeMessage(GetCpeMessageType(cmdName), cmdArgs);
+            p.SendCpeMessage(GetCpeMessageType(cmdName), cmdArgs, Chat.PersistentMessage.Priority.Normal);
         }
         bool GetIntRawOrVal(string arg, string actionName, out int value) {
             if (!Int32.TryParse(arg, out value)) {
@@ -2031,7 +2033,7 @@ namespace PluginCCS {
             scriptData.replies[replyNum-1] = new ReplyData(scriptName, labelName, isOS, notifyPlayer);
             
             CpeMessageType type = CmdReplyTwo.GetReplyMessageType(replyNum);
-            p.SendCpeMessage(type, "%f["+replyNum+"] "+replyMessage);
+            p.SendCpeMessage(type, "%f["+replyNum+"] "+replyMessage, CmdReplyTwo.replyPriority);
         }
         public void TempBlock() { DoCmd(Core.tempBlockCmd, args); }
         public void TempChunk() { DoCmd(Core.tempChunkCmd, args); }
@@ -2247,7 +2249,7 @@ namespace PluginCCS {
         public void ResetReplies() {
             for (int i = 0; i < CmdReplyTwo.maxReplyCount; i++) {
                 if (replies[i] == null) { continue; } //dont erase CPE lines that don't have a reply to clear
-                p.SendCpeMessage(CmdReplyTwo.GetReplyMessageType(i+1), ""); //the message type is 1-6 and we iterate 0-5, hence +1
+                p.SendCpeMessage(CmdReplyTwo.GetReplyMessageType(i+1), "", CmdReplyTwo.replyPriority); //the message type is 1-6 and we iterate 0-5, hence +1
             }
             SetRepliesNull();
         }
@@ -2282,7 +2284,7 @@ namespace PluginCCS {
             debuggingDelay = 0;
             
             
-            SetRepliesNull();
+            ResetReplies();
             frozen = false;
             stareCoords = null;
             Reset(true, true, "");
