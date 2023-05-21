@@ -1437,7 +1437,7 @@ namespace PluginCCS {
                 hasCef = true;
                 SetString("cef", "true");
             }
-            if (p.Session.appName != null && p.Session.appName.CaselessContains("mobile") || p.Session.appName.CaselessContains("android")) {
+            if (p.Session.appName != null && (p.Session.appName.CaselessContains("mobile") || p.Session.appName.CaselessContains("android"))) {
                 SetString("mobile", "true");
             }
             if (p.Session.appName != null && p.Session.appName.CaselessContains("web")) {
