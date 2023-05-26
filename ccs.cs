@@ -547,7 +547,7 @@ namespace PluginCCS {
             byte[] webData = HttpUtil.DownloadData(message, p); 
             if (webData == null) { return; }
 
-            Script.Update(p, Script.OS_PREFIX + p.name.ToLower(), webData);
+            Script.Update(p, Script.OS_PREFIX + p.level.name.ToLower(), webData);
         }
         
         public override void Help(Player p) {
