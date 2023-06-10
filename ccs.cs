@@ -1,3 +1,4 @@
+//pluginref _extralevelprops.dll
 //reference System.Core.dll
 //reference System.dll
 //reference Cmdhelpers.dll
@@ -19,7 +20,7 @@ using MCGalaxy.Commands;
 using MCGalaxy.Network;
 using BlockID = System.UInt16;
 using ScriptAction = System.Action;
-
+using ExtraLevelProps;
 
 namespace PluginCCS {
     
@@ -946,7 +947,7 @@ namespace PluginCCS {
             script = LoadScript(p, fullPath);
             if (script != null) {
                 lock (locker) { loadedScripts[scriptName] = script; }
-                p.Message("Compiled script {0}.", scriptName);
+                //p.Message("Compiled script {0}.", scriptName);
             }
 
             return script;
@@ -1215,11 +1216,15 @@ namespace PluginCCS {
 
             string scriptCmdName;
             string scriptName = p.level.name;
+            bool isOS;
             if (IsOs(p.level)) { //assume os script
                 scriptCmdName = Core.osRunscriptCmd.name;
                 scriptName = OS_PREFIX + scriptName;
+                isOS = true;
             } else {
                 scriptCmdName = Core.runscriptCmd.name;
+                scriptName = p.level.GetExtraPropString("input", p.level.name);
+                isOS = false;
             }
 
             if (!File.Exists(FullPath(scriptName))) {
@@ -1237,6 +1242,7 @@ namespace PluginCCS {
             runArg1 = runArg1.Replace(" ", "_");
             runArg2 = runArg2.Replace(" ", "_");
             string args = calledLabel + "|" + runArg1 + "|" + runArg2;
+            if (!isOS) { args = scriptName + " " + args; } //if not OS, add possibly custom script name to command args
             if (async) { args = args + " repeatable"; }
 
             data.Context = CommandContext.MessageBlock;
@@ -1286,7 +1292,7 @@ namespace PluginCCS {
     //Fields
     public partial class ScriptRunner {
         
-        const int actionLimit = 30680;
+        const int actionLimit = 61360;
         const int actionLimitOS = 15340;
         const int newThreadLimit = 20;
         const int newThreadLimitOS = 10;
@@ -1825,7 +1831,11 @@ namespace PluginCCS {
         }
         void CpeMessage() {
             if (cmdName == "") { Error(); p.Message("&cNot enough arguments for cpemsg"); return; }
-            p.SendCpeMessage(GetCpeMessageType(cmdName), cmdArgs, Chat.PersistentMessage.Priority.Normal);
+            CpeMessageType type = GetCpeMessageType(cmdName);
+            if (type == CpeMessageType.Announcement || type == CpeMessageType.BigAnnouncement || type == CpeMessageType.SmallAnnouncement) {
+                amountOfCharsInLastMessage = cmdArgs.Length;
+            }
+            p.SendCpeMessage(type, cmdArgs, Chat.PersistentMessage.Priority.Normal);
         }
         bool GetIntRawOrVal(string arg, string actionName, out int value) {
             if (!Int32.TryParse(arg, out value)) {
