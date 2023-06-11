@@ -441,7 +441,7 @@ namespace PluginCCS {
         const CpeMessageType line5 = CpeMessageType.Status2;
         const CpeMessageType line6 = CpeMessageType.Status3;
         
-        public const Chat.PersistentMessage.Priority replyPriority = Chat.PersistentMessage.Priority.Highest;
+        public const PersistentMessagePriority replyPriority = PersistentMessagePriority.Highest;
         
         public override void Use(Player p, string message, CommandData data)
         {
@@ -716,7 +716,7 @@ namespace PluginCCS {
             //clear all persistent chat lines at default priority
             for (int i = 1; i < CmdReplyTwo.maxReplyCount+1; i++) {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
-                if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", Chat.PersistentMessage.Priority.Normal); }
+                if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", PersistentMessagePriority.Normal); }
             }
             ScriptData data;
             if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnJoinedLevel(); }
@@ -1835,7 +1835,7 @@ namespace PluginCCS {
             if (type == CpeMessageType.Announcement || type == CpeMessageType.BigAnnouncement || type == CpeMessageType.SmallAnnouncement) {
                 amountOfCharsInLastMessage = cmdArgs.Length;
             }
-            p.SendCpeMessage(type, cmdArgs, Chat.PersistentMessage.Priority.Normal);
+            p.SendCpeMessage(type, cmdArgs, PersistentMessagePriority.Normal);
         }
         bool GetIntRawOrVal(string arg, string actionName, out int value) {
             if (!Int32.TryParse(arg, out value)) {
