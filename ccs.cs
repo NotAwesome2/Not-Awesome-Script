@@ -30,6 +30,7 @@ namespace PluginCCS {
         public override string type { get { return CommandTypes.Building; } }
         public override bool museumUsable { get { return true; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+		public override bool LogUsage { get { return false; } }
 
         public override void Use(Player p, string message, CommandData data) {      
             
@@ -100,6 +101,7 @@ namespace PluginCCS {
         public override string type { get { return CommandTypes.Building; } }
         public override bool museumUsable { get { return true; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+		public override bool LogUsage { get { return false; } }
 
         public override void Use(Player p, string message, CommandData data) {      
             
@@ -432,6 +434,7 @@ namespace PluginCCS {
         public override string type { get { return "other"; } }
         public override bool museumUsable { get { return false; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+		public override bool LogUsage { get { return false; } }
         public const int maxReplyCount = 6;
         const CpeMessageType line1 = CpeMessageType.BottomRight3;
         const CpeMessageType line2 = CpeMessageType.BottomRight2;
@@ -606,6 +609,18 @@ namespace PluginCCS {
         public static Command updateOsScriptCmd;
         public static Command tp;
         
+        
+        static Command _boostCmd = null;
+        public static Command boostCmd {
+            get { if (_boostCmd == null) { _boostCmd = Command.Find("boost"); } return _boostCmd; }
+        }
+        
+        static Command _effectCmd = null;
+        public static Command effectCmd {
+            get { if (_effectCmd == null) { _effectCmd = Command.Find("effect"); } return _effectCmd; }
+        }
+        
+        
         public override void Load(bool startup) {
 
             Script.PluginLoad();
@@ -675,7 +690,7 @@ namespace PluginCCS {
             OnPlayerMoveEvent.Unregister(OnPlayerMove);
             
             
-            //TODO: make script data persist between plugin reloads
+            SaveAllPlayerData();
             scriptDataAtPlayer.Clear();
         }
         
@@ -693,21 +708,24 @@ namespace PluginCCS {
             }
         }
         static void OnPlayerDisconnect(Player p, string reason) {
-            
             if (reason.StartsWith("(Reconnecting")) {
                 Logger.Log(LogType.SystemActivity, "ccs is not clearing scriptdata due to player reconnecting: " + p.name);
                 return;
             }
             
-            
-            ScriptData data;
-            if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) {
-                //Chat.MessageGlobal("{0} caused an error in PluginCCS when disconnecting", p.name);
-                throw new ArgumentException("There was no "+p.name+" ScriptData to handle OnPlayerDisconnect");
-            }
-
-            data.Dispose();
+            SavePlayerData(p);
             scriptDataAtPlayer.Remove(p.name);
+        }
+        static void SaveAllPlayerData() {
+            Player[] players = PlayerInfo.Online.Items;
+            foreach (Player p in players) {
+                SavePlayerData(p);
+            }
+        }
+        static void SavePlayerData(Player p) {
+            ScriptData data;
+            if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) { return; }
+            data.WriteSavedStringsToDisk();
         }
         static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             Script.OnJoiningLevel(p, lvl, ref canJoin);
@@ -805,15 +823,17 @@ namespace PluginCCS {
         public override bool museumUsable { get { return false; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Admin; } }
         public override bool UpdatesLastCmd { get { return false; } }
+		public override bool LogUsage { get { return false; } }
+        public override CommandPerm[] ExtraPerms {
+            get { return new[] { new CommandPerm(LevelPermission.Operator, "can run scripts without message blocks") }; }
+        }
         
         //script #tallyEggs
         //script egg2021 #tallyEggs repeatable
         //script egg2021 #tallyEggs|some|run|args repeatable
         public override void Use(Player p, string message, CommandData data) {
-            if ( !(data.Context == CommandContext.MessageBlock || p.group.Permission >= LevelPermission.Operator) ) {
-                p.Message("%b/{0} %Sis only meant to run from message blocks.", name);
-                return;
-            }
+            if ( !(data.Context == CommandContext.MessageBlock || CheckExtraPerm(p, data, 1)) ) { return; }
+            
             if (message.Length == 0) { Help(p); return; }
             string[] args = message.SplitSpaces();
             int argsOffset = 0;
@@ -850,6 +870,7 @@ namespace PluginCCS {
         public override string name { get { return "OsScript"; } }
         public override string shortcut { get { return "oss"; } }
         public override bool MessageBlockRestricted { get { return false; } }
+		public override bool LogUsage { get { return false; } }
         
         //osscript #tallyEggs repeatable
         //osscript #tallyEggs|some|run|args repeatable
@@ -1149,6 +1170,12 @@ namespace PluginCCS {
                         case "setdirvector":
                             scriptLine.actionType = ScriptRunner.ActionType.SetDirVector;
                             break;
+                        case "boost":
+                            scriptLine.actionType = ScriptRunner.ActionType.Boost;
+                            break;
+                        case "effect":
+                            scriptLine.actionType = ScriptRunner.ActionType.Effect;
+                            break;
                         default:
                             p.Message("&cError when compiling script on line " + lineNumber + ": unknown Action \"" + actionType + "\" detected.");
                             return null;
@@ -1440,6 +1467,14 @@ namespace PluginCCS {
             }
             try {
                 cmd.Use(p, args, data);
+            } catch (Exception ex) {
+                Logger.LogError(ex);
+                Error(); p.Message("&cAn error occured and command {0} could not be executed.", cmd.name);
+            }
+        }
+        void DoCmdNoPermChecks(Command cmd, string args) {
+            try {
+                cmd.Use(p, args, GetCommandData());
             } catch (Exception ex) {
                 Logger.LogError(ex);
                 Error(); p.Message("&cAn error occured and command {0} could not be executed.", cmd.name);
@@ -1809,7 +1844,8 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector
+            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
+            Boost, Effect
             };
         }
         public enum ActionType : int {
@@ -1818,7 +1854,8 @@ namespace PluginCCS {
             Quit, Terminate, Show, Kill, Cmd, ResetData, Item,
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
-            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector
+            DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
+            Boost, Effect
         }
         ScriptAction[] Actions;
         
@@ -2134,8 +2171,8 @@ namespace PluginCCS {
             CpeMessageType type = CmdReplyTwo.GetReplyMessageType(replyNum);
             p.SendCpeMessage(type, "%f["+replyNum+"] "+replyMessage, CmdReplyTwo.replyPriority);
         }
-        void TempBlock() { DoCmd(Core.tempBlockCmd, args); }
-        void TempChunk() { DoCmd(Core.tempChunkCmd, args); }
+        void TempBlock() { DoCmdNoPermChecks(Core.tempBlockCmd, args); }
+        void TempChunk() { DoCmdNoPermChecks(Core.tempChunkCmd, args); }
         void Reach() {
             double dist = 0;
             if (!GetDoubleRawOrVal(cmdName, "Reach", out dist)) { return; }
@@ -2238,6 +2275,8 @@ namespace PluginCCS {
             
             p.UpdateModel(cmdName);
         }
+        void Boost() { DoCmdNoPermChecks(Core.boostCmd, args); }
+        void Effect() { DoCmdNoPermChecks(Core.effectCmd, args); }
         
         const string doubleToFourDecimalPlaces = "0.#####";
         void SetDirVector() {
@@ -2418,7 +2457,7 @@ namespace PluginCCS {
             return Matcher.Filter(keys, keyword, key => key);
         }
         
-        public void Dispose() {
+        public void WriteSavedStringsToDisk() {
             //if (savedStrings.Count == 0) { return; } //if all saved data is erased the file still needs to be written to to reset it so this should stay commented out
             
             string filePath, fileName;
