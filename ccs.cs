@@ -11,6 +11,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Net;
+using System.Security.Policy;
 using MCGalaxy;
 using MCGalaxy.Maths;
 using MCGalaxy.Events.PlayerEvents;
@@ -21,6 +22,7 @@ using MCGalaxy.Network;
 using BlockID = System.UInt16;
 using ScriptAction = System.Action;
 using ExtraLevelProps;
+
 
 namespace PluginCCS {
     
@@ -219,19 +221,62 @@ namespace PluginCCS {
         public override string type { get { return "other"; } }
         public override bool museumUsable { get { return false; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Operator; } }
-
-        //assumes item is already uppercase
-        public static string AOrAn(string item) {
-            if (item.StartsWith("A") || item.StartsWith("E") || item.StartsWith("I") || item.StartsWith("O") || item.StartsWith("U")) { return "an"; }
-            return "a";
+        
+        //also ensures directory exists
+        static string ItemDirectory(string playerName) {
+            string directory = "text/inventory/" + playerName + "/";
+            if (!Directory.Exists(directory)) { Directory.CreateDirectory(directory); }
+            return directory;
         }
-        public override void Use(Player p, string message, CommandData data)
-        {
+        
+        static string FormatItem(string item) {
+            item = item.ToUpper();
+            item = item.Replace(' ', '_');
+            return item;
+        }
+        
+        static void ListItemsAndVars(Player p, string[] allItems) {
+            p.Message("%eYour stuff:");
+            string[] coloredItems = new string[allItems.Length];
+            for (int i = 0; i < allItems.Length; i++) {
+                string itemName = Path.GetFileName(allItems[i]);
+                string color = ItemColor(itemName);
+                coloredItems[i] = color + itemName;
+            }
+            p.Message(String.Join(" &8• ", coloredItems));
+        }
+        static void GetItemOnline(Player p, string item) {
+            item = FormatItem(item);
+            if (ItemExists(p.name, item)) { return; }
+            
+            GetItemOffline(p.name, item);
+            if (IsVar(item)) { return; }
+            
+            string aOrAn = AOrAn(item);
+            string color = ItemColor(item);
+            p.Message("You found " + aOrAn +" " + color + item.Replace('_', ' ') + "%S!");
+            p.Message("Check what stuff you have with &b/stuff%S.");
+        }
+        //same as Helpers.ItemExists, but for offline player name. Does not format item name.
+        public static bool ItemExists(string playerName, string item) {
+            string directory = ItemDirectory(playerName);
+            return File.Exists(directory + item);
+        }
+        public static void GetItemOffline(string playerName, string item) {
+            item = FormatItem(item);
+
+            string directory = ItemDirectory(playerName);
+            if (ItemExists(playerName, item)) { return; }
+            
+            File.WriteAllText(directory + item + "", "");
+        }
+        
+        public override void Use(Player p, string message, CommandData data) {
             string[] words = message.SplitSpaces(4);
             p.lastCMD = "nothing2";
             
-            string directory = "text/inventory/" + p.name + "/";
-            if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
+            string directory = ItemDirectory(p.name);
+            
             DirectoryInfo info = new DirectoryInfo(directory);
             FileInfo[] allItemFiles = info.GetFiles().OrderBy(f => f.CreationTime).ToArray();
             string[] allItems = new string[allItemFiles.Length]; //Directory.GetFiles(directory);
@@ -245,56 +290,26 @@ namespace PluginCCS {
                 
                 string function = words[1].ToUpper();
                 
-                if (function == "LIST") {
-                    
-                    p.Message("%eYour stuff:");
-                    string[] coloredItems = new string[allItemFiles.Length];
-                    for (int i = 0; i < allItems.Length; i++) {
-                        string itemName = Path.GetFileName(allItems[i]);
-                        string color = ItemColor(itemName);
-                        coloredItems[i] = color + itemName;
-                    }
-                    p.Message(String.Join(" &8• ", coloredItems));
-                    return;
-                }
+                if (function == "LIST") { ListItemsAndVars(p, allItems); return; }
                 
                 
                 if (function == "GET" || function == "GIVE") {
                     if (words.Length < 3) {
-                        p.Message("Not enough arguments."); return;
+                        p.Message("Not enough arguments to GET item."); return;
                     }
                     string[] getSplit = message.SplitSpaces(3); //"password" "get" "item name"
-                    
-                    string item = getSplit[2].ToUpper();
-                    if (item.Contains('~')) { p.Message("%cERROR! ITEM STILL HAS DESC IN GET FUNCTION! TELL GOODLY!"); return; }
-                    item = item.Replace(' ', '_');
-
-
-                    string aOrAn = AOrAn(item);
-                    
-                    if (File.Exists(directory + item)) { return; }
-                    
-                    
-                    File.WriteAllText(directory + item + "", "");
-                    if (IsVar(item)) { return; }
-                    
-                    string color = ItemColor(item);
-                    
-                    p.Message("You found " + aOrAn +" " + color + item.Replace('_', ' ') + "%S!");
-                    p.Message("Check what stuff you have with &b/stuff%S.");
+                    string item = getSplit[2];
+                    GetItemOnline(p, item);
                     return;
                 }
                 
                 
                 if (function == "TAKE" || function == "REMOVE") {
                     if (words.Length < 3) {
-                        p.Message("Not enough arguments."); return;
+                        p.Message("Not enough arguments to TAKE item."); return;
                     }
                     string[] takeSplit = message.SplitSpaces(3); //"password" "take" "item name"
-                    
-                    string item = takeSplit[2].ToUpper();
-                    item = item.Replace(' ', '_');
-                    
+                    string item = takeSplit[2];
                     TakeItem(p, item);
                     return;
                 }
@@ -311,8 +326,8 @@ namespace PluginCCS {
                     p.Message("Please specify something to examine."); return;
                 }
                 string[] lookSplit = message.SplitSpaces(2);
-                string examinedItem = lookSplit[1].ToUpper();
-                examinedItem = examinedItem.Replace(' ', '_');
+                string examinedItem = lookSplit[1];
+                examinedItem = FormatItem(examinedItem);
                 
                 if (!Helpers.ItemExists(p, examinedItem) || examinedItem.StartsWith("VAR.")) {
                     p.Message("&cYou dont have any stuff called \"{0}\".", examinedItem.Replace('_', ' ')); return;
@@ -355,18 +370,22 @@ namespace PluginCCS {
             
         }
         
-        public static bool IsVar(string item) {
+        
+        //assumes item is already uppercase
+        static string AOrAn(string item) {
+            if (item.StartsWith("A") || item.StartsWith("E") || item.StartsWith("I") || item.StartsWith("O") || item.StartsWith("U")) { return "an"; }
+            return "a";
+        }
+        static bool IsVar(string item) {
             if (item.StartsWith("VAR.")) { return true; }
             return false;
         }
-        
         public static void TakeItem(Player p, string item) {
+            item = FormatItem(item);
             if (item.Contains("/") || item.Contains("\\")) return;
             
-            item = item.ToUpper();
-            
-            string directory = "text/inventory/" + p.name + "/";
-            if (!File.Exists(directory + item)) { return; }
+            string directory = ItemDirectory(p.name);
+            if (!ItemExists(p.name, item)) { return; }
             
             string color = ItemColor(item);
             
@@ -375,25 +394,24 @@ namespace PluginCCS {
                         
             p.Message(color + item.Replace('_', ' ') + "%S was removed from your stuff.");
         }
-        public const string itemNoDescColor = "&b";
-        public const string itemDescColor = "&6";
-        public static string ItemColor(string itemName) {
+        const string itemNoDescColor = "&b";
+        const string itemDescColor = "&6";
+        static string ItemColor(string itemName) {
             if (ItemDesc(itemName) == null) return itemNoDescColor;
             if (ItemDesc(itemName).Length == 0) return itemNoDescColor;
             return itemDescColor;
         }
         
-        public static string[] ItemDesc(string itemName) {
+        static string[] ItemDesc(string itemName) {
             string[] itemDesc;// = new string[] { "" };
-            string directory = "text/itemDesc/";
-            if (!File.Exists(directory + itemName + ".txt")) { return null; }
+            string descDirectory = "text/itemDesc/";
+            if (!File.Exists(descDirectory + itemName + ".txt")) { return null; }
             
-            itemDesc = File.ReadAllLines(directory + itemName + ".txt");                
+            itemDesc = File.ReadAllLines(descDirectory + itemName + ".txt");                
             return itemDesc;
         }
 
-        public override void Help(Player p)
-        {
+        public override void Help(Player p) {
             p.Message("%T/Stuff");
             p.Message("%HLists your stuff.");
             p.Message("%eUse %b/stuff look [item name] %eto examine items.");
@@ -608,6 +626,7 @@ namespace PluginCCS {
         public static Command itemsCmd;
         public static Command updateOsScriptCmd;
         public static Command tp;
+        public static Command downloadScriptCmd;
         
         
         static Command _boostCmd = null;
@@ -635,6 +654,7 @@ namespace PluginCCS {
             replyCmd          = new CmdReplyTwo();
             itemsCmd          = new CmdItems();
             updateOsScriptCmd = new CmdUpdateOsScript();
+            downloadScriptCmd = new CmdDownloadScript();
             tp = Command.Find("tp");
             
             Command.Register(tempBlockCmd);
@@ -647,6 +667,7 @@ namespace PluginCCS {
             Command.Register(replyCmd);
             Command.Register(itemsCmd);
             Command.Register(updateOsScriptCmd);
+            Command.Register(downloadScriptCmd);
             
             OnPlayerFinishConnectingEvent.Register(OnPlayerFinishConnecting, Priority.High);
             OnInfoSwapEvent.Register(OnInfoSwap, Priority.Low);
@@ -676,6 +697,7 @@ namespace PluginCCS {
             Command.Unregister(replyCmd);
             Command.Unregister(itemsCmd);
             Command.Unregister(updateOsScriptCmd);
+            Command.Unregister(downloadScriptCmd);
             
             OnPlayerFinishConnectingEvent.Unregister(OnPlayerFinishConnecting);
             OnInfoSwapEvent.Unregister(OnInfoSwap);
@@ -731,10 +753,10 @@ namespace PluginCCS {
             Script.OnJoiningLevel(p, lvl, ref canJoin);
         }
         static void OnJoinedLevel(Player p, Level prevLevel, Level level, ref bool announce) {
-            //clear all persistent chat lines at default priority
+            //clear all persistent chat lines at the priority used by cpemessage in script
             for (int i = 1; i < CmdReplyTwo.maxReplyCount+1; i++) {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
-                if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", PersistentMessagePriority.Normal); }
+                if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", ScriptRunner.CpeMessagePriority); }
             }
             ScriptData data;
             if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnJoinedLevel(); }
@@ -930,15 +952,78 @@ namespace PluginCCS {
         }
     }
     
+    public class CmdDownloadScript : CmdScript {
+        public override string name { get { return "DownloadScript"; } }
+        public override string shortcut { get { return ""; } }
+        public override bool MessageBlockRestricted { get { return true; } }
+		public override bool LogUsage { get { return true; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Admin; } }
+        
+        public override void Use(Player p, string message, CommandData data) {
+            if (!Server.Config.Name.StartsWith("Not Awesome 2")) {
+                p.Message("This command can't be used on &b{0}&S because it uses unique web services that are only available on Not Awesome 2. Sorry!", Server.Config.Name);
+                return;
+            }
+            if ( !(data.Context == CommandContext.MessageBlock || LevelInfo.IsRealmOwner(p.name, p.level.name) || p.group.Permission >= LevelPermission.Operator) ) {
+                p.Message("You can only use %b/{0} %Sif you are the map owner.", name);
+                return;
+            }
+            if (!Directory.Exists(directory)) { Directory.CreateDirectory(directory); }
+            string scriptPath = Script.FullPath(Script.OS_PREFIX + p.level.name.ToLower());
+            if (!File.Exists(scriptPath)) { p.Message("&cNo os script has been uploaded to {0}&c.", p.level.ColoredName); return; }
+            
+            try {
+                File.Copy(scriptPath, fullPath(p.level), true);
+            } catch (System.Exception e) {
+                p.Message("&cAn error occured while retrieving your script:");
+                p.Message(e.Message);
+                return;
+            }
+            p.Message("Your {0}&S script has been prepared for download. You may download the copy from here:", p.level.ColoredName);
+            p.Message(url(p.level));
+        }
+        
+        
+        static string fullPath(Level level) { return directory + fileName(level); }
+        static string directory { get { return "/home/na2/Website-Files/" + folder; } }
+        static string folder { get { return "osscripts/"; } }
+        static string fileName(Level level) { return level.name.ToLower() + "-" + GetMD5(level) + Script.EXT; }
+        static string url(Level level) { return "https://notawesome.cc/" + folder + fileName(level); }
+        
+        static string GetMD5(Level level) {
+            string input = (level.name.ToLower() + Core.password).GetHashCode().ToString();
+            using (System.Security.Cryptography.MD5 md5 = System.Security.Cryptography.MD5.Create()) {
+                byte[] inputBytes = Encoding.ASCII.GetBytes(input);
+                byte[] hashBytes = md5.ComputeHash(inputBytes);
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < hashBytes.Length; i++) {
+                    sb.Append(hashBytes[i].ToString("X2"));
+                }
+                string end = "";
+                int i2 = 0;
+                foreach (char c in sb.ToString().ToCharArray()) {
+                    if (i2 % 6 == 0) end += c;
+                    i2++;
+                }
+                return end;
+            }
+        }
+        
+        public override void Help(Player p) {
+            p.Message("%T/DownloadScript");
+            p.Message("%HAllows you to download the os script of your map.");
+        }
+    }
+    
     
     public class Script {
 
-        const string EXT = ".nas";
+        public const string EXT = ".nas";
         const string PATH = "scripts/";
         public const string OS_PREFIX = "os/";
-        const string PATH_OS = PATH + OS_PREFIX;
+        public const string PATH_OS = PATH + OS_PREFIX;
 
-        static string FullPath(string scriptName) { return PATH + scriptName + EXT; }
+        public static string FullPath(string scriptName) { return PATH + scriptName + EXT; }
 
         /// <summary>
         /// Key is script name, e.g. os/goodlyay+ or fbcommon, value is Script
@@ -1866,13 +1951,14 @@ namespace PluginCCS {
             amountOfCharsInLastMessage = args.Length;
             p.Message(args);
         }
+        public static PersistentMessagePriority CpeMessagePriority = PersistentMessagePriority.High;
         void CpeMessage() {
             if (cmdName == "") { Error(); p.Message("&cNot enough arguments for cpemsg"); return; }
             CpeMessageType type = GetCpeMessageType(cmdName);
             if (type == CpeMessageType.Announcement || type == CpeMessageType.BigAnnouncement || type == CpeMessageType.SmallAnnouncement) {
                 amountOfCharsInLastMessage = cmdArgs.Length;
             }
-            p.SendCpeMessage(type, cmdArgs, PersistentMessagePriority.Normal);
+            p.SendCpeMessage(type, cmdArgs, CpeMessagePriority);
         }
         bool GetIntRawOrVal(string arg, string actionName, out int value) {
             if (!Int32.TryParse(arg, out value)) {
@@ -2454,7 +2540,7 @@ namespace PluginCCS {
         }
         static List<string> MatchingKeys<T>(Dictionary<string, T> dict, string keyword) {
             var keys = dict.Keys.ToList();
-            return Matcher.Filter(keys, keyword, key => key);
+            return Wildcard.Filter(keys, keyword, key => key);
         }
         
         public void WriteSavedStringsToDisk() {
