@@ -1,7 +1,10 @@
+//pluginref __item.dll
 //pluginref _extralevelprops.dll
+//pluginref _na2lib.dll
+
 //reference System.Core.dll
 //reference System.dll
-//reference Cmdhelpers.dll
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -22,7 +25,7 @@ using MCGalaxy.Network;
 using BlockID = System.UInt16;
 using ScriptAction = System.Action;
 using ExtraLevelProps;
-
+using NA2;
 
 namespace PluginCCS {
     
@@ -221,226 +224,130 @@ namespace PluginCCS {
         public override string type { get { return "other"; } }
         public override bool museumUsable { get { return false; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Operator; } }
-        
-        //also ensures directory exists
-        static string ItemDirectory(string playerName) {
-            string directory = "text/inventory/" + playerName + "/";
-            if (!Directory.Exists(directory)) { Directory.CreateDirectory(directory); }
-            return directory;
-        }
-        
-        static string FormatItem(string item) {
-            item = item.ToUpper();
-            item = item.Replace(' ', '_');
-            return item;
-        }
-        
-        static void ListItemsAndVars(Player p, string[] allItems) {
-            p.Message("%eYour stuff:");
-            string[] coloredItems = new string[allItems.Length];
-            for (int i = 0; i < allItems.Length; i++) {
-                string itemName = Path.GetFileName(allItems[i]);
-                string color = ItemColor(itemName);
-                coloredItems[i] = color + itemName;
-            }
-            p.Message(String.Join(" &8• ", coloredItems));
-        }
-        static void GetItemOnline(Player p, string item) {
-            item = FormatItem(item);
-            if (ItemExists(p.name, item)) { return; }
-            
-            GetItemOffline(p.name, item);
-            if (IsVar(item)) { return; }
-            
-            string aOrAn = AOrAn(item);
-            string color = ItemColor(item);
-            p.Message("You found " + aOrAn +" " + color + item.Replace('_', ' ') + "%S!");
-            p.Message("Check what stuff you have with &b/stuff%S.");
-        }
-        //same as Helpers.ItemExists, but for offline player name. Does not format item name.
-        public static bool ItemExists(string playerName, string item) {
-            string directory = ItemDirectory(playerName);
-            return File.Exists(directory + item);
-        }
-        public static void GetItemOffline(string playerName, string item) {
-            item = FormatItem(item);
 
-            string directory = ItemDirectory(playerName);
-            if (ItemExists(playerName, item)) { return; }
-            
-            File.WriteAllText(directory + item + "", "");
-        }
-        
         public override void Use(Player p, string message, CommandData data) {
-            string[] words = message.SplitSpaces(4);
             p.lastCMD = "nothing2";
-            
-            string directory = ItemDirectory(p.name);
-            
-            DirectoryInfo info = new DirectoryInfo(directory);
-            FileInfo[] allItemFiles = info.GetFiles().OrderBy(f => f.CreationTime).ToArray();
-            string[] allItems = new string[allItemFiles.Length]; //Directory.GetFiles(directory);
-            for (int i = 0; i < allItems.Length; i++) {
-                allItems[i] = allItemFiles[i].Name;
+            if (message.Length == 0) {
+                DisplayItems(p, false);
+                _Help(p);
+                return;
             }
+            string[] args = message.SplitSpaces(2);
+            string function = args[0].ToUpper();
+            string functionArgs = args.Length > 1 ? args[1] : "";
 
-            if (words[0].ToUpper() == Core.password) {
-                
-                if (words.Length < 2) { return; }
-                
-                string function = words[1].ToUpper();
-                
-                if (function == "LIST") { ListItemsAndVars(p, allItems); return; }
-                
-                
-                if (function == "GET" || function == "GIVE") {
-                    if (words.Length < 3) {
-                        p.Message("Not enough arguments to GET item."); return;
-                    }
-                    string[] getSplit = message.SplitSpaces(3); //"password" "get" "item name"
-                    string item = getSplit[2];
-                    GetItemOnline(p, item);
-                    return;
-                }
-                
-                
-                if (function == "TAKE" || function == "REMOVE") {
-                    if (words.Length < 3) {
-                        p.Message("Not enough arguments to TAKE item."); return;
-                    }
-                    string[] takeSplit = message.SplitSpaces(3); //"password" "take" "item name"
-                    string item = takeSplit[2];
-                    TakeItem(p, item);
-                    return;
-                }
-                p.Message("Function &c" + function + "%S was unrecognized."); return;
-            }
-            
-            if (words[0].ToUpper() == "DROP") {
+            if (function == "DROP") {
                 p.Message("%cTo delete stuff, use %b/drop [name]");
                 return;
             }
-            
-            if (words[0].ToUpper() == "LOOK" || words[0].ToUpper() == "EXAMINE") {
-                if (words.Length < 2) {
-                    p.Message("Please specify something to examine."); return;
-                }
-                string[] lookSplit = message.SplitSpaces(2);
-                string examinedItem = lookSplit[1];
-                examinedItem = FormatItem(examinedItem);
-                
-                if (!Helpers.ItemExists(p, examinedItem) || examinedItem.StartsWith("VAR.")) {
-                    p.Message("&cYou dont have any stuff called \"{0}\".", examinedItem.Replace('_', ' ')); return;
-                }
-                if (ItemDesc(examinedItem) == null ) {
-                    p.Message("You don't notice anything particular about the &b{0}%S.", examinedItem.Replace('_', ' ')); return;
-                }
-                if (ItemDesc(examinedItem).Length == 0 ) {
-                    p.Message("You don't notice anything particular about the &b{0}%S.", examinedItem.Replace('_', ' ')); return;
-                }
-                
-                string color = ItemColor(examinedItem);
-                
-                p.Message("You examine the "+color+"{0}%S...", examinedItem.Replace('_', ' '));
-                Thread.Sleep(1000);
-                p.MessageLines(ItemDesc(examinedItem).Select(line => "&e" + line));
+            if (function == "LOOK" || function == "EXAMINE") {
+                UseExamine(p, functionArgs);
+                return;
+            }
+            if (function == Core.password) {
+                UsePassword(p, functionArgs);
                 return;
             }
             
-            int amountVars = 0;
-            foreach (string item in allItems) {
-                string itemName = Path.GetFileName(item);
-                if (IsVar(itemName)) { amountVars++; }
+            p.Message("&WUnknown &T/stuff &Warg \"{0}\"", function);
+            Help(p);
+        }
+        
+        static void UseExamine(Player p, string itemName) {
+            if (itemName == "") {
+                p.Message("Please specify something to examine.");
+                return;
             }
-            if (allItems.Length == 0 || allItems.Length == amountVars) { p.Message("%cYou have no stuff!"); return; }
+            Item item = Item.MakeInstance(p, itemName);
+            if (item == null) { return; }
             
+            if (!item.OwnedBy(p.name) || item.isVar) {
+                p.Message("&cYou dont have any stuff called \"{0}\".", item.displayName);
+                return;
+            }
+            string[] desc = item.ItemDesc; //cache
+            if (desc.Length == 0 ) {
+                p.Message("You don't notice anything particular about the {0}%S.", item.ColoredName); return;
+            }
+            
+            p.Message("You examine the {0}%S...", item.ColoredName);
+            Thread.Sleep(1000);
+            p.MessageLines(desc.Select(line => "&e" + line));
+        }
+        
+        static void UsePassword(Player p, string message) {
+            if (message == "") { p.Message("Expected arg LIST, GET/GIVE [ITEM_NAME], or TAKE/REMOVE [ITEM_NAME]"); return; }
+            string[] args = message.ToUpper().SplitSpaces(2);
+            string function = args[0];
+            
+            if (function == "LIST") { DisplayItems(p, true); return; }
+            
+            string itemName = args.Length > 1 ? args[1] : "";
+            Item item = Item.MakeInstance(p, itemName);
+            if (item == null) { return; }
+            
+            if (function == "GET" || function == "GIVE") { item.GiveTo(p); return; }
+            
+            if (function == "TAKE" || function == "REMOVE") { item.TakeFrom(p); return; }
+            
+            p.Message("Function &c" + function + "%S was unrecognized."); return;
+        }
+        
+        static void DisplayItems(Player p, bool showVars) {
             p.Message("%eYour stuff:");
-            string[] coloredNonVars = new string[allItemFiles.Length -amountVars];
-            int nonVarIndex = 0;
-            for (int i = 0; i < allItems.Length; i++) {
-                string itemName = Path.GetFileName(allItems[i]);
-                if (IsVar(itemName)) { continue; }
-                string color = ItemColor(itemName);
-                coloredNonVars[nonVarIndex++] = color + itemName.Replace('_', ' ');
+            
+            Item[] items = Item.GetItemsOwnedBy(p.name);
+            
+            List<string> coloredItems = new List<string>(items.Length);
+            int amountDisplayed = 0;
+            for (int i = 0; i < items.Length; i++) {
+                if (items[i].isVar && !showVars) { continue; }
+                amountDisplayed++;
+                coloredItems.Add(items[i].ColoredName);
             }
-            p.Message("&f> "+String.Join(" &8• ", coloredNonVars));
-            p.Message("%eUse %b/stuff look [item name] %eto examine items.");
-            p.Message("%HTo delete stuff, use %b/drop [item name]");
-            
-            
+            if (amountDisplayed == 0) {
+                p.Message("You have no stuff!"); return;
+            }
+            p.Message(String.Join(" &8• ", coloredItems));
         }
         
-        
-        //assumes item is already uppercase
-        static string AOrAn(string item) {
-            if (item.StartsWith("A") || item.StartsWith("E") || item.StartsWith("I") || item.StartsWith("O") || item.StartsWith("U")) { return "an"; }
-            return "a";
-        }
-        static bool IsVar(string item) {
-            if (item.StartsWith("VAR.")) { return true; }
-            return false;
-        }
-        public static void TakeItem(Player p, string item) {
-            item = FormatItem(item);
-            if (item.Contains("/") || item.Contains("\\")) return;
-            
-            string directory = ItemDirectory(p.name);
-            if (!ItemExists(p.name, item)) { return; }
-            
-            string color = ItemColor(item);
-            
-            File.Delete(directory + item);
-            if (IsVar(item)) { return; }
-                        
-            p.Message(color + item.Replace('_', ' ') + "%S was removed from your stuff.");
-        }
-        const string itemNoDescColor = "&b";
-        const string itemDescColor = "&6";
-        static string ItemColor(string itemName) {
-            if (ItemDesc(itemName) == null) return itemNoDescColor;
-            if (ItemDesc(itemName).Length == 0) return itemNoDescColor;
-            return itemDescColor;
-        }
-        
-        static string[] ItemDesc(string itemName) {
-            string[] itemDesc;// = new string[] { "" };
-            string descDirectory = "text/itemDesc/";
-            if (!File.Exists(descDirectory + itemName + ".txt")) { return null; }
-            
-            itemDesc = File.ReadAllLines(descDirectory + itemName + ".txt");                
-            return itemDesc;
-        }
-
         public override void Help(Player p) {
             p.Message("%T/Stuff");
             p.Message("%HLists your stuff.");
+            _Help(p);
+        }
+        
+        static void _Help(Player p) {
             p.Message("%eUse %b/stuff look [item name] %eto examine items.");
             p.Message("%HTo delete stuff, use %b/drop [item name]");
         }
+        
     }
+    
     public class CmdDrop : Command2 {
         public override string name { get { return "drop"; } }
         public override bool MessageBlockRestricted { get { return true; } }
         public override string type { get { return "other"; } }
         public override bool museumUsable { get { return true; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+        
         public override void Use(Player p, string message, CommandData data)
         {
             if (message == "") { Help(p); return; }
-            message = message.Replace(' ', '_');
-            message = message.ToUpper();
             
+            Item item = Item.MakeInstance(p, message);
+            if (item == null) { return; }
             
-            if (!Helpers.ItemExists(p, message) || message.StartsWith("VAR.")) {
-                p.Message("%cYou don't have any stuff called \"{0}\"", message.Replace('_', ' '));
+            if (!item.OwnedBy(p.name) || item.isVar) {
+                p.Message("&cYou dont have any stuff called \"{0}\".", item.displayName);
                 return;
             }
             
-            CmdStuff.TakeItem(p, message);
+            item.TakeFrom(p);
         }
-        public override void Help(Player p)
-        {
-            p.Message("%T/Drop [name]");
+        
+        public override void Help(Player p) {
+            p.Message("%T/Drop [stuff]");
             p.Message("%HDrops the /stuff you specify.");
         }
     }
@@ -537,11 +444,6 @@ namespace PluginCCS {
         public override bool museumUsable { get { return false; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Operator; } }
 
-        //assumes item is already uppercase
-        public static string AOrAn(string item) {
-            if (item.StartsWith("A") || item.StartsWith("E") || item.StartsWith("I") || item.StartsWith("O") || item.StartsWith("U")) { return "an"; }
-            return "a";
-        }
         public override void Use(Player p, string message, CommandData data) {
             Core.GetScriptData(p).DisplayItems();
         }
@@ -1909,7 +1811,7 @@ namespace PluginCCS {
         
         string ReplaceAts(string message) {
             message = message.Replace("@p", p.name);
-            message = message.Replace("@nick", Helpers.MakeNatural(p.DisplayName));
+            message = message.Replace("@nick", NameUtils.MakeNatural(p.DisplayName));
             return message;
         }
         
@@ -2606,7 +2508,13 @@ namespace PluginCCS {
         public void GiveItem(string itemName, bool isOS) { if (isOS) { OsGiveItem(itemName); } else { ModGiveItem(itemName); } }
         public void TakeItem(string itemName, bool isOS) { if (isOS) { OsTakeItem(itemName); } else { ModTakeItem(itemName); } }
         
-        private bool ModHasItem(string itemName)  { return Helpers.ItemExists(p, itemName); }
+        private bool ModHasItem(string itemName)  {
+            try {
+                return new Item(itemName).OwnedBy(p.name);
+            } catch (System.ArgumentException e) {
+                return false;
+            }
+        }
         private void ModGiveItem(string itemName) { Core.stuffCmd.Use(p, Core.password +" get "+itemName.ToUpper()); }
         private void ModTakeItem(string itemName) { Core.stuffCmd.Use(p, Core.password +" take "+itemName.ToUpper()); }
         
