@@ -6,7 +6,7 @@ Scripting plugin made for Not Awesome 2.
 Not Awesome Script has a few extra steps compared to loading other plugins.
 
 1. This plugin depends on [ExtraLevelProps](https://github.com/NotAwesome2/Plugins#_extralevelpropscs). You must load _extralevelprops.cs plugin before you load this ccs.cs plugin.
-2. The included files Cmdflairs.dll and Cmdhelpers.dll must be placed next to MCGalaxy.exe. Then you must restart the server.
+2. This plugin depends on __item.cs and _na2lib.cs. You must load both of these plugins before you can load this ccs.cs plugin.
 3. **Change the password called "CHANGETHIS" within ccs.cs.** The password must be all UPPERCASE. Knowing this password allows anyone to give themselves any item.
 4. Finally, you can load ccs itself:
 5. Place ccs.cs file in *plugins* folder.
