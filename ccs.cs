@@ -222,9 +222,13 @@ namespace PluginCCS {
         public override string name { get { return "Stuff"; } }
         public override string shortcut { get { return ""; } }
         public override string type { get { return "other"; } }
+        public override bool MessageBlockRestricted { get { return true; } }
         public override bool museumUsable { get { return false; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Operator; } }
-
+        public override CommandPerm[] ExtraPerms {
+            get { return new[] { new CommandPerm(LevelPermission.Operator, "can get/take stuff without message blocks") }; }
+        }
+        
         public override void Use(Player p, string message, CommandData data) {
             p.lastCMD = "nothing2";
             if (message.Length == 0) {
@@ -244,12 +248,18 @@ namespace PluginCCS {
                 UseExamine(p, functionArgs);
                 return;
             }
-            if (function == Core.password) {
-                UsePassword(p, functionArgs);
+            Action unknownMsg = () => { p.Message("&WUnknown &T/stuff &Warg \"{0}\"", function); };
+            
+            if (functionArgs != "") {
+                if ( !(data.Context == CommandContext.MessageBlock || HasExtraPerm(p, p.Rank, 1)) ) {
+                    unknownMsg();
+                    return;
+                }
+                UseGiveTake(p, functionArgs, data);
                 return;
             }
             
-            p.Message("&WUnknown &T/stuff &Warg \"{0}\"", function);
+            unknownMsg();
             Help(p);
         }
         
@@ -275,7 +285,7 @@ namespace PluginCCS {
             p.MessageLines(desc.Select(line => "&e" + line));
         }
         
-        static void UsePassword(Player p, string message) {
+        void UseGiveTake(Player p, string message, CommandData data) {
             if (message == "") { p.Message("Expected arg LIST, GET/GIVE [ITEM_NAME], or TAKE/REMOVE [ITEM_NAME]"); return; }
             string[] args = message.ToUpper().SplitSpaces(2);
             string function = args[0];
@@ -315,6 +325,11 @@ namespace PluginCCS {
             p.Message("%T/Stuff");
             p.Message("%HLists your stuff.");
             _Help(p);
+            if (!HasExtraPerm(p, p.Rank, 1)) { return; }
+            p.Message("%T/Stuff [anyword] GET [item]");
+            p.Message("%T/Stuff [anyword] TAKE [item]");
+            p.Message("%HStaff only -- get/take any item.");
+            p.Message("%H[anyword] is required for backwards compatibility with the obsolete password system.");
         }
         
         static void _Help(Player p) {
@@ -1306,8 +1321,8 @@ namespace PluginCCS {
     //Fields
     public partial class ScriptRunner {
         
-        const int actionLimit = 61360;
-        const int actionLimitOS = 15340;
+        const int actionLimit = 61360 * 4;
+        const int actionLimitOS = 61360;
         const int newThreadLimit = 20;
         const int newThreadLimitOS = 10;
         
@@ -2516,8 +2531,8 @@ namespace PluginCCS {
                 return false;
             }
         }
-        private void ModGiveItem(string itemName) { Core.stuffCmd.Use(p, Core.password +" get "+itemName.ToUpper()); }
-        private void ModTakeItem(string itemName) { Core.stuffCmd.Use(p, Core.password +" take "+itemName.ToUpper()); }
+        private void ModGiveItem(string itemName) { Core.stuffCmd.Use(p, "obsoleteArg" +" get "+itemName.ToUpper()); }
+        private void ModTakeItem(string itemName) { Core.stuffCmd.Use(p, "obsoleteArg" +" take "+itemName.ToUpper()); }
         
         //#region OS
         public void DisplayItems() {
