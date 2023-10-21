@@ -1810,6 +1810,7 @@ namespace PluginCCS {
         }
         
         string ReplaceAts(string message) {
+            if (message.IndexOf('@') == -1) { return message; }
             message = message.Replace("@p", p.name);
             message = message.Replace("@nick", NameUtils.MakeNatural(p.DisplayName));
             return message;
