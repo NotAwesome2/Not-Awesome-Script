@@ -496,9 +496,7 @@ namespace PluginCCS {
     }
     
     public sealed class Core : Plugin {
-        public static string password = "CHANGETHIS";
-        public static char[] pipeChar = new char[] { '|' };
-        public static string runArgSpaceSubstitute = "_";
+        
         public override string creator { get { return "Goodly"; } }
         public override string name { get { return "ccs"; } }
         public override string MCGalaxy_Version { get { return "1.9.3.9"; } }
@@ -518,19 +516,6 @@ namespace PluginCCS {
                 }
             }
         }
-        
-        private static Random rnd = new Random();
-        private static readonly object rndLocker = new object();
-        public static int RandomRange(int inclusiveMin, int inclusiveMax) {
-            lock (rndLocker) { return rnd.Next(inclusiveMin, inclusiveMax+1); }
-        }
-        public static double RandomRangeDouble(double min, double max) {
-            lock (rndLocker) { return (rnd.NextDouble() * (max - min) + min); }
-        }
-        public static string RandomEntry(string[] entries) {
-            lock (rndLocker) { return entries[rnd.Next(entries.Length)]; }
-        }
-        
         
         public static Command tempBlockCmd;
         public static Command tempChunkCmd;
@@ -632,6 +617,12 @@ namespace PluginCCS {
             SaveAllPlayerData();
             scriptDataAtPlayer.Clear();
         }
+        static void SaveAllPlayerData() {
+            Player[] players = PlayerInfo.Online.Items;
+            foreach (Player p in players) {
+                SavePlayerData(p);
+            }
+        }
         
         static void OnPlayerFinishConnecting(Player p) {
             //Logger.Log(LogType.SystemActivity, "ccs CONECTING " + p.name + " : " + Environment.StackTrace);
@@ -655,12 +646,6 @@ namespace PluginCCS {
             SavePlayerData(p);
             scriptDataAtPlayer.Remove(p.name);
         }
-        static void SaveAllPlayerData() {
-            Player[] players = PlayerInfo.Online.Items;
-            foreach (Player p in players) {
-                SavePlayerData(p);
-            }
-        }
         static void SavePlayerData(Player p) {
             ScriptData data;
             if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) { return; }
@@ -678,7 +663,6 @@ namespace PluginCCS {
             ScriptData data;
             if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnJoinedLevel(); }
         }
-        
         static void OnInfoSwap(string source, string dest) {
             string sourcePath = ScriptData.savePath+source;
             string destPath = ScriptData.savePath+dest;
@@ -695,63 +679,25 @@ namespace PluginCCS {
                 Directory.Move(backupPath, destPath);
             }
         }
-        
         static void OnLevelRenamed(string srcMap, string dstMap) {
             Script.OnLevelRenamed(srcMap, dstMap);
         }
         static void OnLevelUnload(Level lvl, ref bool cancel) {
             Script.OnLevelUnload(lvl, ref cancel);
         }
-
         static void OnPlayerChat(Player p, string message) {
             CmdReplyTwo.OnPlayerChat(p, message);
         }
-        void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
+        static void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
             Script.OnPlayerCommand(p, cmd, message, data);
         }
-        
-        void OnPlayerMove(Player p, Position next, byte yaw, byte pitch, ref bool cancel) {
+        static void OnPlayerMove(Player p, Position next, byte yaw, byte pitch, ref bool cancel) {
             ScriptData scriptData = GetScriptData(p); if (scriptData == null) { return; }
             if (scriptData.stareCoords != null) {
                 ScriptRunner.LookAtCoords(p, (Vec3S32)scriptData.stareCoords);
             }
         }
-        public static void TryReplaceRunArgs(string[] newRunArgs, ref string[] runArgs) {
-            if (newRunArgs.Length < 2) { return; }
-            
-            ReplaceUnderScoreWithSpaceInRunArgs(ref newRunArgs);
-            
-            string originalStartLabel = runArgs[0];
-            runArgs = (string[])newRunArgs.Clone();
-            runArgs[0] = originalStartLabel;
-        }
-        public static void ReplaceUnderScoreWithSpaceInRunArgs(ref string[] runArgs) {
-            for (int i = 0; i < runArgs.Length; i++) {
-                if (i == 0) { continue; } //do not replace underscores with spaces in startLabel which is always runArgs[0]
-                runArgs[i] = runArgs[i].Replace(runArgSpaceSubstitute, " ");
-            }
-        }
-        public static void PerformScript(Player p, string scriptName, string startLabel, bool isOS, bool repeatable, CommandData data) {
-            //pass in string arguments after label saparated by | characters
-            string[] runArgs = startLabel.Split('|');
-            startLabel = runArgs[0];
-            ReplaceUnderScoreWithSpaceInRunArgs(ref runArgs);
-            
-            string thisBool = "RunningScript" + scriptName + startLabel;
-            if (!repeatable && p.Extras.GetBoolean(thisBool)) {
-                //p.Message("can't repeat while running");
-                return;
-            }
-            try {
-                if (!repeatable) p.Extras[thisBool] = true;
-                ScriptRunner scriptRunner = ScriptRunner.Create(p, scriptName, isOS, data, repeatable, thisBool, runArgs);
-                if (scriptRunner != null) {
-                    scriptRunner.Run(startLabel);
-                }
-            } finally {
-                if (!repeatable) p.Extras[thisBool] = false;
-            }
-        }
+        
     }
     
     public class CmdScript : Command2 {
@@ -787,7 +733,7 @@ namespace PluginCCS {
             
             string startLabel = args[1+argsOffset];
             bool repeatable = (args.Length > 2+argsOffset && args[2+argsOffset] == "repeatable");
-            Core.PerformScript(p, scriptName, startLabel, false, repeatable, data);
+            ScriptRunner.PerformScript(p, scriptName, startLabel, false, repeatable, data);
         }
         
         public const string labelHelp = "%HLabels are case sensitive and must begin with #";
@@ -824,7 +770,7 @@ namespace PluginCCS {
             string startLabel = args[0];
             bool repeatable = (args.Length > 1 && args[1] == "repeatable");
             
-            Core.PerformScript(p, scriptName, startLabel, true, repeatable, data);
+            ScriptRunner.PerformScript(p, scriptName, startLabel, true, repeatable, data);
         }
         
         public override void Help(Player p) {
@@ -868,8 +814,8 @@ namespace PluginCCS {
             p.Message("&HMakes script print every action it does to chat with optional added <milliseconds> delay after each action.");
         }
     }
-    
     public class CmdDownloadScript : CmdScript {
+        static string hashword = "CHANGETHIS";
         public override string name { get { return "DownloadScript"; } }
         public override string shortcut { get { return ""; } }
         public override bool MessageBlockRestricted { get { return true; } }
@@ -908,7 +854,7 @@ namespace PluginCCS {
         static string url(Level level) { return "https://notawesome.cc/" + folder + fileName(level); }
         
         static string GetMD5(Level level) {
-            string input = (level.name.ToLower() + Core.password).GetHashCode().ToString();
+            string input = (level.name.ToLower() + hashword).GetHashCode().ToString();
             using (System.Security.Cryptography.MD5 md5 = System.Security.Cryptography.MD5.Create()) {
                 byte[] inputBytes = Encoding.ASCII.GetBytes(input);
                 byte[] hashBytes = md5.ComputeHash(inputBytes);
@@ -1321,6 +1267,8 @@ namespace PluginCCS {
     //Fields
     public partial class ScriptRunner {
         
+        static char[] pipeChar = new char[] { '|' };
+        
         const int actionLimit = 61360 * 4;
         const int actionLimitOS = 61360;
         const int newThreadLimit = 20;
@@ -1369,6 +1317,19 @@ namespace PluginCCS {
     }
     //Misc functions
     public partial class ScriptRunner {
+        
+        static Random rnd = new Random();
+        static readonly object rndLocker = new object();
+        static int RandomRange(int inclusiveMin, int inclusiveMax) {
+            lock (rndLocker) { return rnd.Next(inclusiveMin, inclusiveMax+1); }
+        }
+        static double RandomRangeDouble(double min, double max) {
+            lock (rndLocker) { return (rnd.NextDouble() * (max - min) + min); }
+        }
+        static string RandomEntry(string[] entries) {
+            lock (rndLocker) { return entries[rnd.Next(entries.Length)]; }
+        }
+        
         static byte? GetEnvColorType(string type) {
             if (type.CaselessEq("sky"))    { return 0; }
             if (type.CaselessEq("cloud"))  { return 1; }
@@ -1531,11 +1492,50 @@ namespace PluginCCS {
             packet[0] = Opcode.OrientationUpdate; packet[1] = Entities.SelfID; packet[2] = yaw; packet[3] = pitch;
             p.Send(packet);
         }
+        
+        static void TryReplaceRunArgs(string[] newRunArgs, ref string[] runArgs) {
+            if (newRunArgs.Length < 2) { return; }
+            
+            ReplaceUnderScoreWithSpaceInRunArgs(ref newRunArgs);
+            
+            string originalStartLabel = runArgs[0];
+            runArgs = (string[])newRunArgs.Clone();
+            runArgs[0] = originalStartLabel;
+        }
+        static string runArgSpaceSubstitute = "_";
+        static void ReplaceUnderScoreWithSpaceInRunArgs(ref string[] runArgs) {
+            for (int i = 0; i < runArgs.Length; i++) {
+                if (i == 0) { continue; } //do not replace underscores with spaces in startLabel which is always runArgs[0]
+                runArgs[i] = runArgs[i].Replace(runArgSpaceSubstitute, " ");
+            }
+        }
     }
     //Main body
     public partial class ScriptRunner {
         
-        public void Run(string startLabel, int newThreadNestLevel = 1) {
+        public static void PerformScript(Player p, string scriptName, string startLabel, bool isOS, bool repeatable, CommandData data) {
+            //pass in string arguments after label saparated by | characters
+            string[] runArgs = startLabel.Split('|');
+            startLabel = runArgs[0];
+            ReplaceUnderScoreWithSpaceInRunArgs(ref runArgs);
+            
+            string thisBool = "RunningScript" + scriptName + startLabel;
+            if (!repeatable && p.Extras.GetBoolean(thisBool)) {
+                //p.Message("can't repeat while running");
+                return;
+            }
+            try {
+                if (!repeatable) p.Extras[thisBool] = true;
+                ScriptRunner scriptRunner = ScriptRunner.Create(p, scriptName, isOS, data, repeatable, thisBool, runArgs);
+                if (scriptRunner != null) {
+                    scriptRunner.Run(startLabel);
+                }
+            } finally {
+                if (!repeatable) p.Extras[thisBool] = false;
+            }
+        }
+        
+        void Run(string startLabel, int newThreadNestLevel = 1) {
             
             actionCounter = 0;
             this.newThreadNestLevel = newThreadNestLevel;
@@ -1639,7 +1639,7 @@ namespace PluginCCS {
             }
             
             
-            string[] ifBits = parsedConditionArgs.Split(Core.pipeChar);
+            string[] ifBits = parsedConditionArgs.Split(pipeChar);
             string packageName = ifBits[0];
             
             
@@ -1909,8 +1909,8 @@ namespace PluginCCS {
         }
         void Jump() {
             //cmdName is label|runArg|runArg
-            string[] newRunArgs = (cmdName).Split(Core.pipeChar);
-            Core.TryReplaceRunArgs(newRunArgs, ref runArgs);
+            string[] newRunArgs = (cmdName).Split(pipeChar);
+            TryReplaceRunArgs(newRunArgs, ref runArgs);
             
             if (!script.GetLabel(newRunArgs[0], out actionIndex)) {
                 Error(); p.Message("&cUnknown label \"" + newRunArgs[0] + "\".");
@@ -1924,7 +1924,7 @@ namespace PluginCCS {
         void NewThread() {
             if (cmdName.Length == 0) { Error(); p.Message("&cPlease specify a label and or runArgs for the newthread to run with."); return; }
             
-            string[] newThreadRunArgs = (cmdName).Split(Core.pipeChar);
+            string[] newThreadRunArgs = (cmdName).Split(pipeChar);
             string newThreadLabel = newThreadRunArgs[0];
             if (newThreadRunArgs.Length == 1) {
                 //no new runArgs were specified
@@ -1932,7 +1932,7 @@ namespace PluginCCS {
             } else {
                 //they specified new runArgs
                 newThreadRunArgs[0] = runArgs[0]; //preserve starting label from original script instance
-                Core.ReplaceUnderScoreWithSpaceInRunArgs(ref newThreadRunArgs);
+                ReplaceUnderScoreWithSpaceInRunArgs(ref newThreadRunArgs);
             }
             
             if (!script.HasLabel(newThreadLabel)) { Error(); p.Message("&cUnknown newthread label \"" + newThreadLabel + "\"."); return; }
@@ -1984,7 +1984,7 @@ namespace PluginCCS {
             if (!GetIntRawOrVal(bits[1], "SetRandRange", out min)) { return; }
             if (!GetIntRawOrVal(bits[2], "SetRandRange", out max)) { return; }
             if (min > max) { Error(); p.Message("&cMin value for SetRandRange must be smaller than max value."); return; }
-            SetDouble(bits[0], Core.RandomRange(min, max));
+            SetDouble(bits[0], RandomRange(min, max));
         }
         void SetRandRangeDecimal() {
             string[] bits = args.SplitSpaces();
@@ -1993,11 +1993,11 @@ namespace PluginCCS {
             if (!GetDoubleRawOrVal(bits[1], "SetRandRangeDecimal", out min)) { return; }
             if (!GetDoubleRawOrVal(bits[2], "SetRandRangeDecimal", out max)) { return; }
             if (min > max) { Error(); p.Message("&cMin value for SetRandRangeDecimal must be smaller than max value."); return; }
-            SetDouble(bits[0], Core.RandomRangeDouble(min, max));
+            SetDouble(bits[0], RandomRangeDouble(min, max));
         }
         void SetRandList() {
             if (cmdArgs == "") { Error(); p.Message("SetRandList requires a list of values to choose from separated by the | character."); return; }
-            SetString(cmdName, Core.RandomEntry(cmdArgs.Split(Core.pipeChar)));
+            SetString(cmdName, RandomEntry(cmdArgs.Split(pipeChar)));
         }
         delegate double RoundingOp(double value);
         void DoRound(RoundingOp op) {
@@ -2162,7 +2162,7 @@ namespace PluginCCS {
             //reply 1|You: Sure thing.|#replyYes
             //reply 2|You: No thanks.|#replyNo
             //reply 3|You: Can you elaborate?|#replyElaborate
-            string[] replyBits = args.Split(Core.pipeChar, 3);
+            string[] replyBits = args.Split(pipeChar, 3);
             if (replyBits.Length < 3) { Error(); p.Message("&cNot enough arguments to setup a reply: \"" + args + "\"."); return; }
             int replyNum = -1;
             if (!CommandParser.GetInt(p, replyBits[0], "Script setup reply number", ref replyNum, 1, CmdReplyTwo.maxReplyCount)) { Error(true); return; }
@@ -2207,7 +2207,7 @@ namespace PluginCCS {
             // definehotkey [input args]|[key name]|<list of space separated modifiers>
             // definehotkey this is put into slash input!|equals|alt shift
             
-            string[] bits = args.Split(Core.pipeChar);
+            string[] bits = args.Split(pipeChar);
             if (bits.Length < 2) { Error(); p.Message("&cNot enough arguments to define a hotkey: \"" + args + "\"."); return; }
             
             string content = bits[0];
@@ -2228,7 +2228,7 @@ namespace PluginCCS {
             scriptData.hotkeys.Define(action, keyCode, modifiers);
         }
         void UndefineHotkey() {
-            string[] bits = args.Split(Core.pipeChar);
+            string[] bits = args.Split(pipeChar);
             int keyCode = scriptData.hotkeys.GetKeyCode(bits[0]); if (keyCode == 0) { Error(true); return; }
             
             byte modifiers = 0;
@@ -2527,12 +2527,20 @@ namespace PluginCCS {
         private bool ModHasItem(string itemName)  {
             try {
                 return new Item(itemName).OwnedBy(p.name);
-            } catch (System.ArgumentException e) {
+            } catch (System.ArgumentException) {
                 return false;
             }
         }
-        private void ModGiveItem(string itemName) { Core.stuffCmd.Use(p, "obsoleteArg" +" get "+itemName.ToUpper()); }
-        private void ModTakeItem(string itemName) { Core.stuffCmd.Use(p, "obsoleteArg" +" take "+itemName.ToUpper()); }
+        private void UseAsMB(Command cmd, string args) {
+            CommandData data = default(CommandData); data.Context = CommandContext.MessageBlock;
+            cmd.Use(p, args, data);
+        }
+        private void ModGiveItem(string itemName) {
+            UseAsMB(Core.stuffCmd, "obsoleteArg" +" get "+itemName.ToUpper());
+        }
+        private void ModTakeItem(string itemName) {
+            UseAsMB(Core.stuffCmd, "obsoleteArg" +" take "+itemName.ToUpper());
+        }
         
         //#region OS
         public void DisplayItems() {
