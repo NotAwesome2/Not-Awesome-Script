@@ -116,6 +116,7 @@ namespace PluginCCS {
                     return;
                 }
             }
+            Level startingLevel = p.level;
             
             if (message == "") { Help(p); return; }
             string[] words = message.Split(' ');
@@ -152,13 +153,17 @@ namespace PluginCCS {
                     return;
                 }
             }
+            bool pasteAir = true;
+            if (words.Length > 10) {
+                if (!CommandParser.GetBool(p, words[10], ref pasteAir)) { return; }
+            }
             
             //    95, 33, 73, 99, 36, 75, 97, 37, 79
             
             BlockID[] blocks = GetBlocks(p, x1, y1, z1, x2, y2, z2);
             
 
-            PlaceBlocks(p, blocks, x1, y1, z1, x2, y2, z2, x3, y3, z3, allPlayers);
+            PlaceBlocks(p, blocks, x1, y1, z1, x2, y2, z2, x3, y3, z3, allPlayers, pasteAir, startingLevel);
             
         }
         
@@ -182,7 +187,7 @@ namespace PluginCCS {
             return blocks;
         }
         
-        public void PlaceBlocks(Player p, BlockID[] blocks, int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, bool allPlayers = false ) {
+        public void PlaceBlocks(Player p, BlockID[] blocks, int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3, bool allPlayers, bool pasteAir, Level startingLevel) {
             
             int xLen = (x2 - x1) +1;
             int yLen = (y2 - y1) +1;
@@ -191,15 +196,17 @@ namespace PluginCCS {
             Player[] players = allPlayers ? PlayerInfo.Online.Items : new [] { p };
             
             foreach (Player pl in players) {
-                if (pl.level != p.level) continue;
+                if (pl.level != p.level) { continue; }
                 
                 BufferedBlockSender buffer = new BufferedBlockSender(pl);
                 int index = 0;
                 for(int xi = x3; xi < x3+xLen; ++xi) {
                     for(int yi = y3; yi < y3+yLen; ++yi) {
                         for(int zi = z3; zi < z3+zLen; ++zi) {
+                            if (p.level != startingLevel) { return; }
+                            if (!pasteAir && blocks[index] == Block.Air) { index++; continue; }
                             int pos = pl.level.PosToInt( (ushort)xi, (ushort)yi, (ushort)zi);
-                            if (pos >= 0) buffer.Add(pos, blocks[index]);
+                            if (pos >= 0) { buffer.Add(pos, blocks[index]); }
                             index++;
                         }
                     }
@@ -211,9 +218,10 @@ namespace PluginCCS {
         }
         
         public override void Help(Player p) {
-            p.Message("%T/TempChunk %f[x1 y1 z1] %7[x2 y2 z2] %r[x3 y3 z3] <true/false>");
+            p.Message("%T/TempChunk %f[x1 y1 z1] %7[x2 y2 z2] %r[x3 y3 z3] <allPlayers?true/false> <pasteAir?true/false>");
             p.Message("%HCopies a chunk of the world defined by %ffirst %Hand %7second%H coords then pastes it into the spot defined by the %rthird %Hset of coords.");
-            p.Message("%HThe last option is optional, and defaults to false. If true, the tempchunk changes are sent to all players in the map.");
+            p.Message("%H<allPlayers?true/false> is optional, and defaults to false. If true, the tempchunk changes are sent to all players in the map.");
+            p.Message("%H<pasteAir?true/false> is optional, and defaults to true. If false, the tempchunk will not paste air blocks. You need to specify the first optional arg to specify this one.");
         }
         
     }
@@ -941,7 +949,9 @@ namespace PluginCCS {
             foreach (string lineRead in scriptLines) {
                 lineNumber++;
                 string line = lineRead.Trim();
-                if (line.Length == 0 || line.StartsWith("//")) continue;
+                
+                if (line == "//allowcef") { script.shouldSendCef = true; continue; }
+                if (line.Length == 0 || line.StartsWith("//")) { continue; }
 
                 if (line[0] == '#') {
                     if (line.Contains('|')) { p.Message("&cError when compiling script on line " + lineNumber + ": Declaring labels with pipe character | is not allowed."); return null; }
@@ -1187,7 +1197,11 @@ namespace PluginCCS {
         public static void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
             string calledLabel;
             bool async;
-            if (cmd.CaselessEq("input")) { calledLabel = "#input"; async = false; } else if (cmd.CaselessEq("inputAsync")) { calledLabel = "#inputAsync"; async = true; } else { return; }
+            if (cmd.CaselessEq("input")) {
+                calledLabel = "#input"; async = false;
+            } else if (cmd.CaselessEq("inputAsync")) {
+                calledLabel = "#inputAsync"; async = true; }
+            else { return; }
 
             string scriptCmdName;
             string scriptName = p.level.name;
@@ -1238,6 +1252,8 @@ namespace PluginCCS {
         public bool GetLabel(string label, out int actionIndex) { return labels.TryGetValue(label, out actionIndex); }
 
         public List<ScriptLine> actions = new List<ScriptLine>();
+        
+        public bool shouldSendCef;
 
     }
 
@@ -1311,7 +1327,11 @@ namespace PluginCCS {
         int actionCounter;
         int newThreadNestLevel;
         int lineNumber = -1;
+        
+        bool isCefMessage(string message) { return message.StartsWith("cef "); }
+        bool shouldSendCef { get { return hasCef && script.shouldSendCef; } }
         bool hasCef = false;
+        
         int amountOfCharsInLastMessage = 0;
         string[] runArgs;
     }
@@ -1865,7 +1885,7 @@ namespace PluginCCS {
         //is this silly?
         void None() { }
         void Message() {
-            if (!hasCef && args.StartsWith("cef ")) { return; }
+            if (!shouldSendCef && isCefMessage(args)) { return; }
             amountOfCharsInLastMessage = args.Length;
             p.Message(args);
         }
@@ -2439,7 +2459,7 @@ namespace PluginCCS {
             if (packages) { ResetDict(strings, matcher); }
             if (items)  { ResetDict(osItems, matcher); }
         }
-        public void ResetDict<T>(Dictionary<string, T> dict, string matcher) {
+        void ResetDict<T>(Dictionary<string, T> dict, string matcher) {
             if (matcher.Length == 0) { dict.Clear(); return; }
             List<string> keysToRemove = MatchingKeys(dict, matcher);
             foreach (string key in keysToRemove) {
@@ -2506,7 +2526,7 @@ namespace PluginCCS {
             
             var dict = saved ? savedStrings : strings;
             string value = "";
-            if (dict.ContainsKey(stringName) ) { value = dict[stringName]; }
+            if (dict.TryGetValue(stringName, out string dicValue)) { value = dicValue; }
             //p.Message("getstring: saved is {0} and string {1} is being set to {2}", saved, stringName, value);
             return value;
         }
