@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using MCGalaxy;
+using MCGalaxy.Modules.Awards;
 
 namespace NA2 {
     
@@ -24,6 +25,36 @@ namespace NA2 {
             return naturalNameEndStart;
         }
         
+    }
+    
+    public static class AwardUtils {
+        public static bool GiveTo(Player p, string awardName) {
+            Award award = AwardsList.FindExact(awardName);
+            if (award == null) { p.Message("&WCannot give invalid award \"{0}\"", awardName); return false; }
+            
+            if (!GiveToOffline(p.name, award.Name)) { return false; }
+            
+            Chat.MessageGlobal("{0} &Swas awarded: &b{1}", p.ColoredName, award.Name);
+            return true;
+        }
+        public static bool GiveToOffline(string playerName, string awardName) {
+            Award award = AwardsList.FindExact(awardName);
+            if (award == null) { throw new System.ArgumentException("Cannot give invalid award "+awardName+"."); }
+            
+            if (PlayerAwards.Give(playerName, award.Name)) {
+                PlayerAwards.Save();
+                return true;
+            }
+            return false;
+        }
+        
+        public static bool HasAward(string playerName, string awardName) {
+            Award award = AwardsList.FindExact(awardName);
+            if (award == null) { return false; } //award does not exist
+            List<string> playerAwards = PlayerAwards.Get(playerName);
+            if (playerAwards == null || playerAwards.Count == 0) { return false; } //player has no awards
+            return playerAwards.CaselessContains(award.Name);
+        }
     }
     
     public static class NoobMain {

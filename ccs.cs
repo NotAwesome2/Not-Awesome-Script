@@ -22,6 +22,7 @@ using MCGalaxy.Events.LevelEvents;
 using MCGalaxy.Events.PlayerDBEvents;
 using MCGalaxy.Commands;
 using MCGalaxy.Network;
+using MCGalaxy.Modules.Awards;
 using BlockID = System.UInt16;
 using ScriptAction = System.Action;
 using ExtraLevelProps;
@@ -537,7 +538,6 @@ namespace PluginCCS {
         public static Command updateOsScriptCmd;
         public static Command tp;
         public static Command downloadScriptCmd;
-        
         
         static Command _boostCmd = null;
         public static Command boostCmd {
@@ -1133,6 +1133,9 @@ namespace PluginCCS {
                             break;
                         case "effect":
                             scriptLine.actionType = ScriptRunner.ActionType.Effect;
+                            break;
+                        case "award":
+                            scriptLine.actionType = ScriptRunner.ActionType.Award;
                             break;
                         default:
                             p.Message("&cError when compiling script on line " + lineNumber + ": unknown Action \"" + actionType + "\" detected.");
@@ -1868,7 +1871,7 @@ namespace PluginCCS {
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
             DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
-            Boost, Effect
+            Boost, Effect, Award
             };
         }
         public enum ActionType : int {
@@ -1878,7 +1881,7 @@ namespace PluginCCS {
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
             DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
-            Boost, Effect
+            Boost, Effect, Award
         }
         ScriptAction[] Actions;
         
@@ -2265,12 +2268,19 @@ namespace PluginCCS {
             if (!CommandParser.GetCoords(p, bits, 1, ref coords)) { Error(true); return; }
             
             BlockID block = 0;
-            if (!CommandParser.GetBlock(p, bits[0], out block)) return;
+            if (!CommandParser.GetBlock(p, bits[0], out block)) { return; }
             
-            if (!MCGalaxy.Group.GuestRank.Blocks[block]) {
-                string blockName = Block.GetName(p, block);
-                Error(); p.Message("&cRank {0} &cis not allowed to use block \"{1}\". Therefore, script cannot place it.", MCGalaxy.Group.GuestRank.ColoredName, blockName);
-                return;
+            
+            if (!MCGalaxy.Group.GuestRank.CanPlace[block]) {
+              string blockName = Block.GetName(p, block);
+              Error(); p.Message("&cRank {0} &cis not allowed to use block \"{1}\". Therefore, script cannot place it.", MCGalaxy.Group.GuestRank.ColoredName, blockName);
+              return;
+            }
+            BlockID deleted = startingLevel.GetBlock((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z);
+            if (!MCGalaxy.Group.GuestRank.CanDelete[deleted]) {
+              string blockName = Block.GetName(p, deleted);
+              Error(); p.Message("&cRank {0} &cis not allowed to delete block \"{1}\". Therefore, script cannot replace it.", MCGalaxy.Group.GuestRank.ColoredName, blockName);
+              return;
             }
             
             coords = startingLevel.ClampPos(coords);
@@ -2301,6 +2311,10 @@ namespace PluginCCS {
         }
         void Boost() { DoCmdNoPermChecks(Core.boostCmd, args); }
         void Effect() { DoCmdNoPermChecks(Core.effectCmd, args); }
+        void Award() {
+            if (isOS) { p.Message("&WThe award action is not available in OS scripts."); return; }
+            AwardUtils.GiveTo(p, args);
+        }
         
         const string doubleToFourDecimalPlaces = "0.#####";
         void SetDirVector() {
