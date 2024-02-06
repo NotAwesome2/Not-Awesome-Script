@@ -2540,7 +2540,8 @@ namespace PluginCCS {
             
             var dict = saved ? savedStrings : strings;
             string value = "";
-            if (dict.TryGetValue(stringName, out string dicValue)) { value = dicValue; }
+            string dicValue;
+            if (dict.TryGetValue(stringName, out dicValue)) { value = dicValue; }
             //p.Message("getstring: saved is {0} and string {1} is being set to {2}", saved, stringName, value);
             return value;
         }
