@@ -158,7 +158,7 @@ namespace NA2 {
         public readonly string name;
         public readonly string Description;
         public readonly string hint = null;
-        public bool secret => award.Description.CaselessStarts("secret -");
+        public bool secret { get { return award.Description.CaselessStarts("secret -"); } }
         
         
         public Naward(Award award) {
