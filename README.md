@@ -12,6 +12,10 @@ Not Awesome Script has a few extra steps compared to loading other plugins.
 5. Use `/pcompile ccs`
 6. Use `/pload ccs`
 
+## It failed to compile/there were errors!
+
+This plugin is usually more up-to-date than the latest MCGalaxy release. If you get an error, you probably need to build the MCGalaxy source code yourself or download latest build from [here](https://mcgala.xyz/nightlies).
+
 ## General usage
 
 Script files (.nas) should be placed in "scripts" folder, and "os" scripts (which can be automatically uploaded by players with /osus) are placed in "scripts/os" folder.
