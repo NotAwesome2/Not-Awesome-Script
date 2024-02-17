@@ -29,7 +29,7 @@ using ExtraLevelProps;
 using NA2;
 
 namespace PluginCCS {
-    
+
     public class CmdTempBlock : Command2 {        
         public override string name { get { return "TempBlock"; } }
         public override string shortcut { get { return ""; } }
@@ -355,8 +355,7 @@ namespace PluginCCS {
         public override bool museumUsable { get { return true; } }
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
         
-        public override void Use(Player p, string message, CommandData data)
-        {
+        public override void Use(Player p, string message, CommandData data) {
             if (message == "") { Help(p); return; }
             
             Item item = Item.MakeInstance(p, message);
@@ -1286,7 +1285,7 @@ namespace PluginCCS {
     //Fields
     public partial class ScriptRunner {
         
-        static char[] pipeChar = new char[] { '|' };
+        public static char[] pipeChar = new char[] { '|' };
         
         const int actionLimit = 61360 * 4;
         const int actionLimitOS = 61360;
@@ -1796,8 +1795,8 @@ namespace PluginCCS {
             scriptData.SetString(stringName, value, isOS, scriptName);
         }
         
-        const char beginParseSymbol = '{';
-        const char endParseSymbol = '}';
+        public const char beginParseSymbol = '{';
+        public const char endParseSymbol = '}';
         const int maxRecursions = 32;
         string ParseMessage(string message, int recursions = 0) {
             if (recursions == 0) { message = ReplaceAts(message); }
@@ -2313,7 +2312,7 @@ namespace PluginCCS {
         void Effect() { DoCmdNoPermChecks(Core.effectCmd, args); }
         void Award() {
             if (isOS) { p.Message("&WThe award action is not available in OS scripts."); return; }
-            AwardUtils.GiveTo(p, args);
+            Naward.GiveTo(p, args);
         }
         
         const string doubleToFourDecimalPlaces = "0.#####";
