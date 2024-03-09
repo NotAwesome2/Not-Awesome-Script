@@ -1033,6 +1033,18 @@ namespace PluginCCS {
                         case "setmod":
                             scriptLine.actionType = ScriptRunner.ActionType.SetMod;
                             break;
+                        case "setpow":
+                            scriptLine.actionType = ScriptRunner.ActionType.SetPow;
+                            break;
+                        case "setsin":
+                            scriptLine.actionType = ScriptRunner.ActionType.SetSin;
+                            break;
+                        case "setcos":
+                            scriptLine.actionType = ScriptRunner.ActionType.SetCos;
+                            break;
+                        case "settan":
+                            scriptLine.actionType = ScriptRunner.ActionType.SetTan;
+                            break;
                         case "setrandrange":
                             scriptLine.actionType = ScriptRunner.ActionType.SetRandRange;
                             break;
@@ -1882,7 +1894,7 @@ namespace PluginCCS {
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
             DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
-            Boost, Effect, Award, SetSplit
+            Boost, Effect, Award, SetSplit, SetPow, SetSin, SetCos, SetTan
             };
         }
         public enum ActionType : int {
@@ -1892,7 +1904,7 @@ namespace PluginCCS {
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
             DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
-            Boost, Effect, Award, SetSplit
+            Boost, Effect, Award, SetSplit, SetPow, SetSin, SetCos, SetTan
         }
         ScriptAction[] Actions;
         
@@ -2011,6 +2023,10 @@ namespace PluginCCS {
                 return r < 0 ? r + b : r;
                 });
         }
+        void SetPow() { SetArithmeticOp((a, b) => Math.Pow(a, b)); }
+        void SetSin() { SetArithmeticOp((a, b) => Math.Sin(b)); }
+        void SetCos() { SetArithmeticOp((a, b) => Math.Cos(b)); }
+        void SetTan() { SetArithmeticOp((a, b) => Math.Tan(b)); }
         void SetRandRange() {
             string[] bits = args.SplitSpaces();
             if (bits.Length < 3) { Error(); p.Message("&cNot enough arguments for SetRandRange action"); return; }
