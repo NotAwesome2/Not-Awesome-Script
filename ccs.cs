@@ -581,7 +581,7 @@ namespace PluginCCS {
             OnPlayerFinishConnectingEvent.Register(OnPlayerFinishConnecting, Priority.High);
             OnInfoSwapEvent.Register(OnInfoSwap, Priority.Low);
             OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
-            OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
+            OnPlayerSpawningEvent.Register(OnPlayerSpawning, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
             OnLevelUnloadEvent.Register(OnLevelUnload, Priority.Low);
             OnPlayerChatEvent.Register(OnPlayerChat, Priority.High);
@@ -611,7 +611,7 @@ namespace PluginCCS {
             OnPlayerFinishConnectingEvent.Unregister(OnPlayerFinishConnecting);
             OnInfoSwapEvent.Unregister(OnInfoSwap);
             OnJoiningLevelEvent.Unregister(OnJoiningLevel);
-            OnJoinedLevelEvent.Unregister(OnJoinedLevel);
+            OnPlayerSpawningEvent.Unregister(OnPlayerSpawning);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
             OnPlayerChatEvent.Unregister(OnPlayerChat);
             OnPlayerCommandEvent.Unregister(OnPlayerCommand);
@@ -661,14 +661,16 @@ namespace PluginCCS {
         static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             Script.OnJoiningLevel(p, lvl, ref canJoin);
         }
-        static void OnJoinedLevel(Player p, Level prevLevel, Level level, ref bool announce) {
+        static void OnPlayerSpawning(Player p, ref Position pos, ref byte yaw, ref byte pitch, bool respawning) {
+            if (respawning) { return; } //Only call when spawning in a new level
+            
             //clear all persistent chat lines at the priority used by cpemessage in script
             for (int i = 1; i < CmdReplyTwo.maxReplyCount+1; i++) {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
                 if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", ScriptRunner.CpeMessagePriority); }
             }
             ScriptData data;
-            if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnJoinedLevel(); }
+            if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnPlayerSpawning(); }
         }
         static void OnInfoSwap(string source, string dest) {
             string sourcePath = ScriptData.savePath+source;
@@ -1136,6 +1138,9 @@ namespace PluginCCS {
                         case "award":
                             scriptLine.actionType = ScriptRunner.ActionType.Award;
                             break;
+                        case "setsplit":
+                            scriptLine.actionType = ScriptRunner.ActionType.SetSplit;
+                            break;
                         default:
                             p.Message("&cError when compiling script on line " + lineNumber + ": unknown Action \"" + actionType + "\" detected.");
                             return null;
@@ -1319,6 +1324,7 @@ namespace PluginCCS {
         Level startingLevel;
         string startingLevelName;
         string scriptName;
+        string startLabel;
         bool isOS = false;
         bool repeatable = false;
         string thisBool;
@@ -1336,6 +1342,17 @@ namespace PluginCCS {
         
         int amountOfCharsInLastMessage = 0;
         string[] runArgs;
+        
+        bool _cancelled;
+        public bool cancelled {
+            get { return _cancelled || startingLevelName != p.level.name.ToLower() || p.Socket.Disconnected; }
+            set {
+                if (value != true) { throw new System.ArgumentException("cancelled can only be set to true"); }
+                _cancelled = value;
+                //p.Message("%eScript note: Script {0} {1} cancelled due to switching maps.", scriptName, startLabel);
+            }
+        }
+        
     }
     //Misc functions
     public partial class ScriptRunner {
@@ -1465,11 +1482,11 @@ namespace PluginCCS {
                 Error(); p.Message("&cAn error occured and command {0} could not be executed.", cmd.name);
             }
         }
-        void DoNewThreadRunScript(ScriptRunner script, string startLabel) {
+        void DoNewThreadRunScript(ScriptRunner scriptRunner, string startLabel) {
             Thread thread = new Thread(
                     () => {
                         try {
-                            script.Run(startLabel, newThreadNestLevel+1);
+                            scriptRunner.Run(startLabel, newThreadNestLevel+1);
                         } catch (Exception ex) {
                             Logger.LogError(ex);
                             Error(); p.Message("&cAn error occured and newthread {0} could not be executed.", startLabel);
@@ -1558,6 +1575,7 @@ namespace PluginCCS {
         }
         
         void Run(string startLabel, int newThreadNestLevel = 1) {
+            this.startLabel = startLabel;
             
             actionCounter = 0;
             this.newThreadNestLevel = newThreadNestLevel;
@@ -1579,6 +1597,7 @@ namespace PluginCCS {
                 return;
             }
             
+            scriptData.AddActiveScript(this);
             
             //if player has cef do:
             //bool cef true
@@ -1603,17 +1622,8 @@ namespace PluginCCS {
             lastAction.actionType = ScriptRunner.ActionType.None;
             while (actionIndex < script.actions.Count) {
                 
-                if (p.Socket.Disconnected) { return; }
-                
-                if (startingLevelName != p.level.name.ToLower()) {
-                    //cancel script if the action isn't quit or terminate
-                    if (!(
-                        script.actions[actionIndex].actionType == ScriptRunner.ActionType.Quit ||
-                        script.actions[actionIndex].actionType == ScriptRunner.ActionType.Terminate
-                        )
-                        ) {
-                        p.Message("%eScript note: Script cancelled due to switching maps.");
-                    }
+                if (cancelled) {
+                    scriptData.RemoveActiveScript(this);
                     return;
                 }
                 
@@ -1643,6 +1653,8 @@ namespace PluginCCS {
                     break;
                 }
             }
+            
+            scriptData.RemoveActiveScript(this);
             //p.Message("Script finished after performing {0} actions.", actionCounter);
 
         }
@@ -1870,7 +1882,7 @@ namespace PluginCCS {
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
             DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
-            Boost, Effect, Award
+            Boost, Effect, Award, SetSplit
             };
         }
         public enum ActionType : int {
@@ -1880,7 +1892,7 @@ namespace PluginCCS {
             Freeze, Unfreeze, Look, Stare, NewThread, Env, MOTD, SetSpawn, Reply, ReplySilent,
             TempBlock, TempChunk, Reach, SetBlockID,
             DefineHotkey, UndefineHotkey, PlaceBlock, ChangeModel, SetDirVector,
-            Boost, Effect, Award
+            Boost, Effect, Award, SetSplit
         }
         ScriptAction[] Actions;
         
@@ -2058,7 +2070,7 @@ namespace PluginCCS {
             bool saved;
             
             foreach (string value in values) {
-                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", scriptData.ValidateStringName(value, isOS, scriptName, out saved), GetString(value));
+                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", scriptData.ValidateStringName(value, isOS, scriptName, out saved).ToLower(), GetString(value));
             }
         }
         void Kill() {
@@ -2314,6 +2326,37 @@ namespace PluginCCS {
             if (isOS) { p.Message("&WThe award action is not available in OS scripts."); return; }
             Naward.GiveTo(p, args);
         }
+        void SetSplit() {
+            if (args == "") { Error(); p.Message("&cNot enough arguments for setsplit"); return; }
+            string str = cmdName;
+            System.Func<int, string> index = (i) => {
+                return String.Format("{0}[{1}]", str, i.ToString());
+            };
+            
+            string value = GetString(str);
+            
+            if (cmdArgs == "") {
+                for (int i = 0; i < value.Length; i++) {
+                    SetString(index(i), value[i].ToString());
+                }
+                SetString(str+".Length", value.Length.ToString());
+                return;
+            }
+            
+            string[] separator = new string[] { EscapeQuotes(cmdArgs) };
+            
+            string[] split = value.Split(separator, StringSplitOptions.RemoveEmptyEntries);
+            
+            for (int i = 0; i < split.Length; i++) {
+                SetString(index(i), split[i]);
+            }
+            SetString(str+".Length", split.Length.ToString());
+            return;
+        }
+        static string EscapeQuotes(string input) {
+            if (!input.StartsWith("\"") && !input.EndsWith("\"")) { return input; }
+            return input.Substring(1, input.Length-2);
+        }
         
         const string doubleToFourDecimalPlaces = "0.#####";
         void SetDirVector() {
@@ -2403,13 +2446,34 @@ namespace PluginCCS {
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
         private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
         
+        private readonly object locker = new Object();
+        public void AddActiveScript(ScriptRunner runner) {
+            lock (locker) {
+                activeScripts.Add(runner);
+            }
+        }
+        public void RemoveActiveScript(ScriptRunner runner) {
+            lock (locker) {
+                activeScripts.Remove(runner);
+            }
+        }
+        private List<ScriptRunner> activeScripts = new List<ScriptRunner>();
+        
         public bool debugging = false;
         public int debuggingDelay = 0;
         
         public void ShowAllStrings() {
             if (strings.Count == 0) { p.Message("There are no packages to show"); return; }
+            
+            var all = new List<KeyValuePair<string, string>>();
             foreach (var pair in strings) {
-                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", pair.Key, pair.Value);
+                all.Add(new KeyValuePair<string, string>(pair.Key, pair.Value));
+            }
+            //alphabetical sort
+            all.Sort((name1, name2) => string.Compare(name1.Key, name2.Key));
+            
+            foreach (var pair in all) {
+                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", pair.Key.ToLower(), pair.Value);
             }
         }
         
@@ -2452,7 +2516,17 @@ namespace PluginCCS {
             this.p = p;
             hotkeys.UpdatePlayerReference(p);
         }
-        public void OnJoinedLevel() {
+        public void OnPlayerSpawning() {
+            
+            //p.Message("OnPlayerSpawning {0}", p.level.name);
+            
+            lock (locker) {
+                for (int i = activeScripts.Count-1; i >= 0; i--) {
+                    activeScripts[i].cancelled = true;
+                    activeScripts.Remove(activeScripts[i]);
+                }
+            }
+
             
             if (debugging) p.Message("Script debugging mode is now &cfalse&S.");
             debugging = false;
