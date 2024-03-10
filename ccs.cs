@@ -1142,6 +1142,20 @@ namespace PluginCCS {
 
     }
 
+    public class ScriptLine {
+        public int lineNumber;
+        public ScriptActions.ScriptAction actionType = null;
+        public enum ConditionLogic { None, If, IfNot }
+        public enum ConditionType { Invalid, Item, Val }
+
+        public string actionArgs = "";
+
+        public ConditionLogic conditionLogic = ConditionLogic.None;
+        public ConditionType conditionType = ConditionType.Invalid;
+
+        public string conditionArgs = "";
+    }
+
     //Constructor
     public partial class ScriptRunner {
 
@@ -1803,17 +1817,6 @@ namespace PluginCCS {
         }
     }
 
-
-    public static class Wizardry {
-        public static IEnumerable<Type> GetDerivedTypesFor(Type baseType) {
-            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-
-            return assembly.GetTypes()
-                .Where(baseType.IsAssignableFrom)
-                .Where(t => baseType != t);
-        }
-    }
-
     public static class ScriptActions {
 
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
@@ -2191,6 +2194,18 @@ namespace PluginCCS {
 
             protected override double Op(double a, double b) {
                 return Math.Tan(b);
+            }
+        }
+        public class SetSqrt : SetMath {
+            public override string[] documentation => new string[] {
+                "[package] [number or package]",
+                "    Calculates the square root of [number or package] and inserts it into [package].",
+            };
+
+            public override string name => "setsqrt";
+
+            protected override double Op(double a, double b) {
+                return Math.Sqrt(b);
             }
         }
 
@@ -2992,6 +3007,7 @@ namespace PluginCCS {
         }
     }
 
+
     public static class Docs {
         
         static string DateLine() {
@@ -3259,18 +3275,14 @@ namespace PluginCCS {
         }
     }
 
-    public class ScriptLine {
-        public int lineNumber;
-        public ScriptActions.ScriptAction actionType = null;
-        public enum ConditionLogic { None, If, IfNot }
-        public enum ConditionType { Invalid, Item, Val }
+    public static class Wizardry {
+        public static IEnumerable<Type> GetDerivedTypesFor(Type baseType) {
+            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
 
-        public string actionArgs = "";
-
-        public ConditionLogic conditionLogic = ConditionLogic.None;
-        public ConditionType conditionType = ConditionType.Invalid;
-
-        public string conditionArgs = "";
+            return assembly.GetTypes()
+                .Where(baseType.IsAssignableFrom)
+                .Where(t => baseType != t);
+        }
     }
 
 
