@@ -507,8 +507,8 @@ namespace PluginCCS {
                 return Server.Config.Name.StartsWith("Not Awesome 2");
             }
         }
-        public static string NA2WebFileDirectory return "/home/na2/Website-Files/";
-        public static string NA2WebURL "https://notawesome.cc/";
+        public static string NA2WebFileDirectory = "/home/na2/Website-Files/";
+        public static string NA2WebURL = "https://notawesome.cc/";
 
         public override string creator { get { return "Goodly"; } }
         public override string name { get { return "ccs"; } }
@@ -2993,11 +2993,12 @@ namespace PluginCCS {
     }
 
     public static class Docs {
-        static string[] Intro = new string[] {
-            "Welcome to the documentation for /script and /oss.",
-            "",
-            "Below you will find the following sections:"
-        };
+        
+        static string DateLine() {
+            DateTime date = DateTime.UtcNow;
+            string dateFormatted = date.ToString("yyyy-MM-dd");
+            return "This file was generated from script source code on " + dateFormatted;
+        }
         static List<string> DescribeSections(List<Section> sections) {
             List<string> lines = new List<string>();
             foreach (Section s in sections) {
@@ -3027,7 +3028,10 @@ namespace PluginCCS {
 
 
             List<string> docs = new List<string>();
-            docs.AddRange(Intro);
+            docs.Add("Welcome to the documentation for /script and /oss.");
+            docs.Add(DateLine());
+            docs.Add("");
+            docs.Add("Below you will find the following sections:");
             docs.AddRange(DescribeSections(sections));
             foreach (Section section in sections) { docs.AddRange(section.Lines()); }
 
