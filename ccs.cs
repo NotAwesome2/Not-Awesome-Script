@@ -485,6 +485,7 @@ namespace PluginCCS {
         public override bool UpdatesLastCmd { get { return false; } }
 
         public override void Use(Player p, string message, CommandData data) {
+            if (!Script.OsAllowed(p)) { return; }
             if (!LevelInfo.IsRealmOwner(p.name, p.level.name)) { p.Message("You can only upload scripts to maps that you own."); return; }
             if (message.Length == 0) { p.Message("%cYou need to provide a url of the file that will be used as your map's script."); return; }
 
@@ -763,7 +764,7 @@ namespace PluginCCS {
             p.Message("This command is used in adventure map message blocks for extended functionality.");
             p.Message("In order to use this command you need to write and upload a script to your map.");
             p.Message("For more information, please read the guide:");
-            p.Message("https://dl.dropbox.com/s/tp9tr21k0dr2qpq/ScriptGuide2.txt");
+            p.Message("https://notawesome.cc/docs/nas/getting-started.txt");
         }
     }
     public class CmdOsScript : CmdScript {
@@ -775,6 +776,7 @@ namespace PluginCCS {
         //osscript #tallyEggs repeatable
         //osscript #tallyEggs|some|run|args repeatable
         public override void Use(Player p, string message, CommandData data) {
+            if (!Script.OsAllowed(p)) { return; }
             if (!(data.Context == CommandContext.MessageBlock || LevelInfo.IsRealmOwner(p.name, p.level.name) || p.group.Permission >= LevelPermission.Operator)) {
                 p.Message("You can only use %b/{0} %Sif it is in a message block or you are the map owner.", name);
                 return;
@@ -842,6 +844,7 @@ namespace PluginCCS {
                 p.Message("This command can't be used on &b{0}&S because it uses unique web services that are only available on Not Awesome 2. Sorry!", Server.Config.Name);
                 return;
             }
+            if (!Script.OsAllowed(p)) { return; }
             if (!(data.Context == CommandContext.MessageBlock || LevelInfo.IsRealmOwner(p.name, p.level.name) || p.group.Permission >= LevelPermission.Operator)) {
                 p.Message("You can only use %b/{0} %Sif you are the map owner.", name);
                 return;
@@ -903,6 +906,15 @@ namespace PluginCCS {
 
         public static string FullPath(string scriptName) { return PATH + scriptName + EXT; }
 
+        public static bool OsAllowed(Player p) {
+            bool allowed = Server.Config.ClassicubeAccountPlus;
+            if (!allowed) {
+                p.Message("OS scripts (/oss) are not allowed on this server because it does not use ClassicubeAccountPlus config.");
+                p.Message("This is required for script to be able to detect which levels are os maps.");
+            }
+            return allowed;
+        }
+
         /// <summary>
         /// Key is script name, e.g. os/goodlyay+ or fbcommon, value is Script
         /// </summary>
@@ -928,7 +940,7 @@ namespace PluginCCS {
                 }
             }
 
-            script = LoadScript(p, fullPath);
+            script = CompileScript(p, scriptName, fullPath);
             if (script != null) {
                 lock (locker) { loadedScripts[scriptName] = script; }
                 //p.Message("Compiled script {0}.", scriptName);
@@ -939,100 +951,150 @@ namespace PluginCCS {
         /// <summary>
         /// Path must be fully qualified including extension
         /// </summary>
-        static Script LoadScript(Player p, string path) {
+        static Script CompileScript(Player p, string scriptName, string path) {
 
-            Script script = new Script();
+            Script script = new Script(scriptName);
 
-            string[] scriptLines = new string[] { };
-            try {
-                scriptLines = File.ReadAllLines(path);
-            } catch (IOException e) {
-                p.Message("&cCompiling script error: file read/write error: ({0})", e.Message); return null;
+            script.includedPaths = new List<string>();
+            script.includedPaths.Add(path); //Add self
+
+            string[] scriptLines = GetLines(p, scriptName, path);
+            if (scriptLines == null) { return null; }
+
+            if (!script.AddFile(p, scriptName, scriptLines)) { return null; }
+
+            script.includedPaths = null;
+            return script;
+        }
+        static string[] GetLines(Player p, string scriptName, string path) {
+            lock (locker) {
+                if (!File.Exists(path)) {
+                    CompileError(p, scriptName, -1, "Script file for {0} does not exist.", path); return null;
+                }
+                string[] scriptLines;
+                try {
+                    scriptLines = File.ReadAllLines(path);
+                } catch (IOException e) {
+                    CompileError(p, scriptName, -1, "file read/write error: ({0})", e.Message); return null;
+                }
+                if (scriptLines.Length == 0) { CompileError(p, scriptName, -1, "script \"{0}\" has no contents!", scriptName); return null; }
+                return scriptLines;
             }
+        }
+        //Fills in the actions
+        static void CompileError(Player p, string scriptName, int lineNumber, string message, params object[] args) {
+            p.Message("&cError compiling script {0} on line {1}:", scriptName, lineNumber);
+            p.Message("&c"+ message, args);
+        }
+        bool AddFile(Player p, string scriptName, string[] scriptLines) {
 
-            if (scriptLines.Length == 0) { p.Message("&cCompiling script error: script \"{0}\" has no contents!", path); return null; }
+            Uses uses = new Uses(); //This lives on in the ScriptLines added from this file
+
+            //p.Message("Adding file {0} to {1}", scriptName, name);
 
             int lineNumber = 0;
             foreach (string lineRead in scriptLines) {
                 lineNumber++;
                 string line = lineRead.Trim();
 
-
                 if (line.Length == 0 || line.StartsWith("//")) { continue; }
-                if (script.uses.ReadLine(line)) { continue; }
+
+                if (uses.ReadLine(line)) { continue; }
+
+                if (line.StartsWith("include")) {
+                    string[] bits = line.SplitSpaces();
+                    if (bits.Length != 2) { CompileError(p, scriptName, lineNumber, "Include statement only accepts one argument which is the script to be included."); return false; }
+
+                    string includeScriptName = bits[1].ToLower();
+                    string includePath = FullPath(includeScriptName);
+                    if (includedPaths.Contains(includePath)) {
+                        //p.Message("{0} was already included, ignoring", includeScriptName);
+                        continue;
+                    }
+
+                    includedPaths.Add(includePath);
+
+                    string[] includeLines = GetLines(p, includeScriptName, includePath);
+                    if (includeLines == null) { return false; }
+                    if (!CanInclude(p, scriptName, includeScriptName, lineNumber, includeLines)) { return false; }
+
+                    AddFile(p, includeScriptName, includeLines);
+                    continue;
+                }
 
                 if (line[0] == '#') {
-                    if (line.Contains('|')) { p.Message("&cError when compiling script on line " + lineNumber + ": Declaring labels with pipe character | is not allowed."); return null; }
-                    if (script.labels.ContainsKey(line)) { p.Message("&cError when compiling script on line " + lineNumber + ": Duplicate label \"" + line + "\" detected."); return null; }
-                    script.labels[line] = script.actions.Count;
-                } else {
-                    ScriptLine scriptLine = new ScriptLine();
-                    scriptLine.lineNumber = lineNumber;
-                    string lineTrimmedCondition = line;
-                    if (line.StartsWith("if")) {
-                        Action LackingArgs = () => {
-                            p.Message("&cError when compiling script on line " + lineNumber + ": Line \"" + line + "\" does not have enough arguments.");
-                        };
-
-                        string[] ifBits = line.SplitSpaces();
-                        if (ifBits.Length < 3) { LackingArgs(); return null; }
-                        string logic = ifBits[0];
-                        string type = ifBits[1];
-
-                        if (logic == "ifnot") {
-                            scriptLine.conditionLogic = ScriptLine.ConditionLogic.IfNot;
-                        } else if (logic == "if") {
-                            scriptLine.conditionLogic = ScriptLine.ConditionLogic.If;
-                        } else {
-                            p.Message("&cError when compiling script on line " + lineNumber + ": Logic \"" + logic + "\" is not recognized."); return null;
-                        }
-
-                        if (type == "item") {
-                            //[if]0 [item]1 [SKULL_COIN]2 [msg you have skull]3
-                            scriptLine.conditionType = ScriptLine.ConditionType.Item;
-                            string[] ugh = line.SplitSpaces(4); if (ugh.Length < 4) { LackingArgs(); return null; }
-                            scriptLine.conditionArgs = ugh[2];
-                            lineTrimmedCondition = ugh[3];
-                        } else {
-                            //[if]0 [talkedWitch]1 [msg i dont like you]2
-                            scriptLine.conditionType = ScriptLine.ConditionType.Val;
-                            string[] ugh = line.SplitSpaces(3);
-                            scriptLine.conditionArgs = ugh[1];
-                            lineTrimmedCondition = ugh[2];
-                        }
-                    }
-
-                    string actionType = lineTrimmedCondition.Split(new char[] { ' ' })[0];
-                    scriptLine.actionType = ScriptActions.GetAction(actionType);
-                    if (scriptLine.actionType == null) {
-                        p.Message("&cError when compiling script on line " + lineNumber + ": unknown Action \"" + actionType + "\" detected.");
-                    }
-
-                    if (lineTrimmedCondition.Split(new char[] { ' ' }).Length > 1) {
-                        scriptLine.actionArgs = lineTrimmedCondition.SplitSpaces(2)[1];
-
-                        //p.Message(scriptLine.actionType + " " + scriptLine.actionArgs);
-                    } else {
-                        //p.Message(scriptLine.actionType + ".");
-                    }
-
-                    script.actions.Add(scriptLine);
-
+                    if (line.Contains('|')) { CompileError(p, scriptName, lineNumber, "Declaring labels with pipe character | is not allowed."); return false; }
+                    if (labels.ContainsKey(line)) { CompileError(p, scriptName, lineNumber, "Duplicate label \"" + line + "\" detected."); return false; }
+                    labels[line] = actions.Count;
+                    continue;
                 }
+
+                ScriptLine scriptLine = new ScriptLine(name, uses); //This using is okay because modifying it later will modify the structure this points to
+                scriptLine.lineNumber = lineNumber;
+                string lineTrimmedCondition = line;
+                if (line.StartsWith("if")) {
+                    Action LackingArgs = () => {
+                        CompileError(p, scriptName, lineNumber, "If statement \"" + line + "\" does not have enough arguments.");
+                    };
+
+                    string[] ifBits = line.SplitSpaces();
+                    if (ifBits.Length < 3) { LackingArgs(); return false; }
+                    string logic = ifBits[0];
+                    string type = ifBits[1];
+
+                    if (logic == "ifnot") {
+                        scriptLine.conditionLogic = ScriptLine.ConditionLogic.IfNot;
+                    } else if (logic == "if") {
+                        scriptLine.conditionLogic = ScriptLine.ConditionLogic.If;
+                    } else {
+                        CompileError(p, scriptName, lineNumber, "Logic \"" + logic + "\" is not recognized."); return false;
+                    }
+
+                    if (type == "item") {
+                        //[if]0 [item]1 [SKULL_COIN]2 [msg you have skull]3
+                        scriptLine.conditionType = ScriptLine.ConditionType.Item;
+                        string[] ugh = line.SplitSpaces(4); if (ugh.Length < 4) { LackingArgs(); return false; }
+                        scriptLine.conditionArgs = ugh[2];
+                        lineTrimmedCondition = ugh[3];
+                    } else {
+                        //[if]0 [talkedWitch]1 [msg i dont like you]2
+                        scriptLine.conditionType = ScriptLine.ConditionType.Val;
+                        string[] ugh = line.SplitSpaces(3);
+                        scriptLine.conditionArgs = ugh[1];
+                        lineTrimmedCondition = ugh[2];
+                    }
+                }
+
+                string actionType = lineTrimmedCondition.Split(new char[] { ' ' })[0];
+                scriptLine.actionType = ScriptActions.GetAction(actionType);
+                if (scriptLine.actionType == null) {
+                    CompileError(p, scriptName, lineNumber, "unknown Action \"" + actionType + "\" detected.");
+                }
+
+                if (lineTrimmedCondition.Split(new char[] { ' ' }).Length > 1) {
+                    scriptLine.actionArgs = lineTrimmedCondition.SplitSpaces(2)[1];
+
+                    //p.Message(scriptLine.actionType + " " + scriptLine.actionArgs);
+                } else {
+                    //p.Message(scriptLine.actionType + ".");
+                }
+
+                actions.Add(scriptLine);
+
             }
-
-
-            return script;
+            return true;
         }
 
         public static void Update(Player p, string scriptName, byte[] data) {
-            try {
-                File.WriteAllBytes(FullPath(scriptName), data);
-            } catch (IOException e) {
-                p.Message("Problem while uploading script: ({0})", e.Message);
-                return;
+            lock (locker) {
+                try {
+                    File.WriteAllBytes(FullPath(scriptName), data);
+                } catch (IOException e) {
+                    p.Message("Problem while uploading script: ({0})", e.Message);
+                    return;
+                }
+                p.Message("Done! Uploaded %f" + scriptName + "%S.");
             }
-            p.Message("Done! Uploaded %f" + scriptName + "%S.");
         }
 
         public static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
@@ -1112,9 +1174,11 @@ namespace PluginCCS {
 
         static bool IsOs(Level level) { return level.name.Contains("+"); }
 
-        private Script() {
+        private Script(string name) {
+            this.name = name;
             compileDate = DateTime.UtcNow;
         }
+        public readonly string name;
         private DateTime compileDate;
         private Dictionary<string, int> labels = new Dictionary<string, int>();
         public bool HasLabel(string label) { return labels.ContainsKey(label); }
@@ -1122,19 +1186,36 @@ namespace PluginCCS {
 
         public List<ScriptLine> actions = new List<ScriptLine>();
 
-
-        public Uses uses = new Uses();
+        static bool FromOsFolder(string scriptName) { return scriptName.StartsWith(OS_PREFIX); }
+        /// <summary>
+        /// Acts as include guard. Should probably make a compiler class to throw this away automatically... TOO BAD!
+        /// </summary>
+        List<string> includedPaths;
+        static bool CanInclude(Player p, string thisName, string includeName, int lineNumber, string[] lines) {
+            //staff scripts can include any script
+            if (!FromOsFolder(thisName)) { return true; }
+            const string ALLOW_INCLUDE = Uses.PREFIX + Uses.ALLOW_INCLUDE;
+            foreach (string line in lines) {
+                if (line == ALLOW_INCLUDE) { return true; }
+            }
+            CompileError(p, thisName, lineNumber, "Os scripts may only include script {0} if it has \"{1}\"", includeName, ALLOW_INCLUDE);
+            return false;
+        }
 
         public class Uses {
-            const string PREFIX = "using ";
+            public const string PREFIX = "using ";
+            public const string CEF = "cef";
             public bool cef;
+            public const string QUIT_RESETS_RUNARGS = "quit_resets_runargs";
             public bool quitResetsRunArgs;
+            public const string ALLOW_INCLUDE = "allow_include";
 
             public bool ReadLine(string line) {
                 if (!line.StartsWith(PREFIX)) { return false; }
                 line = line.Substring(PREFIX.Length);
 
-                if (line == "cef") { cef = true; } else if (line == "quit_resets_runargs") { quitResetsRunArgs = true; }
+                if (line == CEF) { cef = true; }
+                else if (line == QUIT_RESETS_RUNARGS) { quitResetsRunArgs = true; }
 
                 return true;
             }
@@ -1143,12 +1224,18 @@ namespace PluginCCS {
     }
 
     public class ScriptLine {
+        public ScriptLine(string scriptName, Script.Uses uses) {
+            this.scriptName = scriptName;
+            this.uses = uses;
+        }
+        public readonly string scriptName;
+        public readonly Script.Uses uses;
         public int lineNumber;
         public ScriptActions.ScriptAction actionType = null;
+        public string actionArgs = "";
+
         public enum ConditionLogic { None, If, IfNot }
         public enum ConditionType { Invalid, Item, Val }
-
-        public string actionArgs = "";
 
         public ConditionLogic conditionLogic = ConditionLogic.None;
         public ConditionType conditionType = ConditionType.Invalid;
@@ -1230,11 +1317,10 @@ namespace PluginCCS {
         public List<Thread> newthreads = new List<Thread>();
         int actionCounter;
         int newThreadNestLevel;
-        int lineNumber = -1;
+        public int lineNumber = -1;
 
         public static bool isCefMessage(string message) { return message.StartsWith("cef "); }
-        public bool shouldSendCef { get { return hasCef && script.uses.cef; } }
-        bool hasCef = false;
+        public bool hasCef { get; private set; }
 
         public int amountOfCharsInLastMessage = 0;
         public string[] runArgs;
@@ -1467,6 +1553,15 @@ namespace PluginCCS {
             CpeMessageType type = CmdReplyTwo.GetReplyMessageType(replyNum);
             p.SendCpeMessage(type, "%f[" + replyNum + "] " + replyMessage, CmdReplyTwo.replyPriority);
         }
+
+        public static bool IsQuoted(string input) {
+            return input.StartsWith("\"") && input.EndsWith("\"");
+        }
+        public static string EscapeQuotes(string input) {
+            if (!IsQuoted(input)) { return input; }
+            return input.Substring(1, input.Length - 2);
+        }
+
     }
     //Main body
     public partial class ScriptRunner {
@@ -1537,7 +1632,7 @@ namespace PluginCCS {
                 p.Message("&lDebug: &6starting {0} at {1}", scriptName, startLabel);
             }
 
-            ScriptLine lastLine = new ScriptLine();
+            ScriptLine lastLine;
 
             while (actionIndex < script.actions.Count) {
 
@@ -1624,7 +1719,12 @@ namespace PluginCCS {
 
             //handle string
             if (equality == "=") {
-                doAction = GetString(packageName).CaselessEq(GetString(comparedToArg)); goto end;
+
+                string comparedToLiteral;
+                if (IsQuoted(comparedToArg)) { comparedToLiteral = EscapeQuotes(comparedToArg); } else { comparedToLiteral = GetString(comparedToArg); }
+
+                doAction = GetString(packageName).CaselessEq(comparedToLiteral);
+                goto end;
             } else {
                 Error(); p.Message("You can only use = as a comparison equality when comparing non-numbers."); return false;
             }
@@ -1638,6 +1738,7 @@ namespace PluginCCS {
         public string args;
         public string cmdName;
         public string cmdArgs;
+        public ScriptLine curLine;
         void RunScriptLine(ScriptLine line) {
             actionIndex++;
             lineNumber = line.lineNumber;
@@ -1654,6 +1755,7 @@ namespace PluginCCS {
                 if (line.actionArgs != args) { p.Message("  {0}", line.actionArgs); }
                 p.Message("  {0}", args);
             }
+            curLine = line;
             line.actionType.Behavior(this);
 
             if (scriptData.debugging && scriptData.debuggingDelay > 0) { Thread.Sleep(scriptData.debuggingDelay); }
@@ -1859,7 +1961,7 @@ namespace PluginCCS {
             public override string name => "msg";
 
             public override void Behavior(ScriptRunner run) {
-                if (!run.shouldSendCef && ScriptRunner.isCefMessage(run.args)) { return; }
+                if (!(run.hasCef && run.curLine.uses.cef) && ScriptRunner.isCefMessage(run.args)) { return; }
                 run.amountOfCharsInLastMessage = run.args.Length;
                 run.p.Message(run.args);
             }
@@ -1971,7 +2073,7 @@ namespace PluginCCS {
                 run.actionIndex = run.comebackToIndex[run.comebackToIndex.Count - 1];
                 run.comebackToIndex.RemoveAt(run.comebackToIndex.Count - 1);
 
-                if (run.script.uses.quitResetsRunArgs) { run.ResetRunArgs(); }
+                if (run.curLine.uses.quitResetsRunArgs) { run.ResetRunArgs(); }
             }
         }
 
@@ -2081,7 +2183,7 @@ namespace PluginCCS {
                 "-       set myHealth {maxHealth}",
                 "-       setadd myHealth healthPotionBoost",
                 "    This results in myHealth with a value of \"15\".",
-                "    Or use a raw number:",
+                "    Or use a literal number:",
                 "-       setadd myHealth 3",
                 "    This results in myHealth with a value of \"13\" (assuming it was 10 to begin with).",
             };
@@ -2561,6 +2663,7 @@ namespace PluginCCS {
             public override string[] documentation => new string[] {
                 "[block coords]",
                 "    Sets the spawn of the player to the coordinates provided.",
+                "    Decimal values are supported.",
             };
 
             public override string name => "setspawn";
@@ -2931,7 +3034,7 @@ namespace PluginCCS {
                     return;
                 }
 
-                string[] separator = new string[] { EscapeQuotes(run.cmdArgs) };
+                string[] separator = new string[] { ScriptRunner.EscapeQuotes(run.cmdArgs) };
 
                 string[] split = value.Split(separator, StringSplitOptions.RemoveEmptyEntries);
 
@@ -2939,11 +3042,6 @@ namespace PluginCCS {
                     run.SetString(index(i), split[i]);
                 }
                 run.SetString(str + ".Length", split.Length.ToString());
-            }
-
-            static string EscapeQuotes(string input) {
-                if (!input.StartsWith("\"") && !input.EndsWith("\"")) { return input; }
-                return input.Substring(1, input.Length - 2);
             }
         }
 
@@ -3009,7 +3107,7 @@ namespace PluginCCS {
 
 
     public static class Docs {
-        
+
         static string DateLine() {
             DateTime date = DateTime.UtcNow;
             string dateFormatted = date.ToString("yyyy-MM-dd");
@@ -3121,6 +3219,14 @@ namespace PluginCCS {
                 "    The [Action] will only be performed if [package] has the same value as [package to compare to].",
                 "    Note the usage of the pipe symbol | to separate the arguments.",
                 "    This comparison is not case sensitive.",
+                "    For example:",
+                "-       set password fittelsnof",
+                "-       if runArg2|=|password msg Drow: Okay, you can enter.",
+                "    You can surround [package to compare to] with quotes to compare to a literal value instead of a package.",
+                "    However, be aware that spaces cannot be used.",
+                "    For example:",
+                "-       if runArg1|=|\"keypad\" msg You check the keypad...",
+                "    The advantage of using a literal is you don't have to setup a package to compare to.",
                 "",
                 "if [package]|[operator]|[number or package] [Action]",
                 "    The [Action] will only be performed if the statement is true.",
@@ -3248,6 +3354,40 @@ namespace PluginCCS {
                 "    THIS IS INCREDIBLY POWERFUL:",
                 "    You can dynamically change what the script is going to do by using the values of packages to modify Action arguments or names of other packages.",
                 "    (programming folks: can you figure out how to do arrays?)",
+            };
+
+            public override List<string> Body() {
+                return body.ToList();
+            }
+        }
+        public class TopLevelStatementsSection : Section {
+            public override string Name => "Top Level Statements";
+
+            static string[] body = new string[] {
+                "Top level statements are like option toggles for the entire script.",
+                "    To activate any given statement, write it *once* somewhere in your script (at the top is standard practice).",
+                "    If you do not write them, they will not be activated (false) by default.",
+                "",
+                "\"using\" statements:",
+                "-   using "+Script.Uses.CEF,
+                "        This allows you to send cef commands to the user through the msg Action. These are normally disallowed because",
+                "        Youtube, which people have historically used for cef soundtracks, is very unreliable now and will give a poor user experience.",
+                "-   using "+Script.Uses.QUIT_RESETS_RUNARGS,
+                "        This makes it so that whenever script runs a \"quit\" action, all runArgs (except 0) will be reset.",
+                "-   using "+Script.Uses.ALLOW_INCLUDE,
+                "        Allows this script's contents to be included in another script.",
+                "",
+                "\"include\" statement:",
+                "-   include [scriptname]",
+                "        This is similar to C \"#include\".",
+                "        All of the contents of [scriptname] will be copy-pasted into your script when it is compiled.",
+                "        For example:",
+                "-           include advlib",
+                "            This is useful because it allows you to use other scripts as a library of reuseable functions.",
+                "            In this example, you'd now be able to call advlib's \"#Text.print\" label from within your script.",
+                "        To include a script from an OS map, use the map named prefixed with \"os/\".",
+                "        For example:",
+                "-           include os/goodlyay+24"
             };
 
             public override List<string> Body() {
