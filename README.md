@@ -20,7 +20,7 @@ This plugin is usually more up-to-date than the latest MCGalaxy release. If you 
 
 Script files (.nas) should be placed in "scripts" folder, and "os" scripts (which can be automatically uploaded by players with /osus) are placed in "scripts/os" folder.
 
-[Documentation for writing .nas files can be found here.](https://dl.dropboxusercontent.com/s/tp9tr21k0dr2qpq/ScriptGuide2.txt)
+[Documentation for writing .nas files can be found here.](https://notawesome.cc/docs/nas/getting-started.txt)
 
 ## Player data
 
