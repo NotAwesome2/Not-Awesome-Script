@@ -407,11 +407,7 @@ namespace PluginCCS {
             //the script has to be ran as if from a message block
             CommandData cmdData = default(CommandData); cmdData.Context = CommandContext.MessageBlock;
 
-            if (replyData.isOS) {
-                Core.osRunscriptCmd.Use(p, replyData.labelName, cmdData);
-            } else {
-                Core.runscriptCmd.Use(p, replyData.scriptName + " " + replyData.labelName, cmdData);
-            }
+            ScriptRunner.PerformScript(p, replyData.scriptName, replyData.labelName, replyData.perms, false, cmdData);
         }
         public static void SetUpDone(Player p) {
             p.Message("&e(say a number to choose a response from the right →→)");
@@ -536,12 +532,14 @@ namespace PluginCCS {
         public static Command dropCmd;
         public static Command runscriptCmd;
         public static Command osRunscriptCmd;
+
         public static Command debugScriptCmd;
         public static Command replyCmd;
         public static Command itemsCmd;
         public static Command updateOsScriptCmd;
-        public static Command tp;
         public static Command downloadScriptCmd;
+
+        static Command[] cmds = new Command[] { new KeybindCommand(), };
 
         static Command _boostCmd = null;
         public static Command boostCmd {
@@ -558,7 +556,9 @@ namespace PluginCCS {
 
             Script.PluginLoad();
             ScriptActions.PluginLoad();
+            ReadOnlyPackages.PluginLoad();
             Docs.PluginLoad();
+            Keybinds.PluginLoad();
 
             tempBlockCmd = new CmdTempBlock();
             tempChunkCmd = new CmdTempChunk();
@@ -571,7 +571,6 @@ namespace PluginCCS {
             itemsCmd = new CmdItems();
             updateOsScriptCmd = new CmdUpdateOsScript();
             downloadScriptCmd = new CmdDownloadScript();
-            tp = Command.Find("tp");
 
             Command.Register(tempBlockCmd);
             Command.Register(tempChunkCmd);
@@ -585,6 +584,8 @@ namespace PluginCCS {
             Command.Register(updateOsScriptCmd);
             Command.Register(downloadScriptCmd);
 
+            foreach (Command cmd in cmds) { Command.Register(cmd); }
+
             OnPlayerFinishConnectingEvent.Register(OnPlayerFinishConnecting, Priority.High);
             OnInfoSwapEvent.Register(OnInfoSwap, Priority.Low);
             OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
@@ -596,11 +597,16 @@ namespace PluginCCS {
 
             OnPlayerDisconnectEvent.Register(OnPlayerDisconnect, Priority.Low);
 
+            OnPlayerMoveEvent.Register(OnPlayerMove, Priority.Low);
+
+            OnPlayerClickEvent.Register(OnPlayerClick, Priority.Low);
+
             foreach (Player pl in PlayerInfo.Online.Items) {
                 OnPlayerFinishConnecting(pl);
             }
-            //placing this after the foreach is my attempt to make sure ScriptData is generated before OnPlayerMove which relies on it
-            OnPlayerMoveEvent.Register(OnPlayerMove, Priority.Low);
+
+
+            Chat.MessageGlobal("Script plugin reloaded. If you're in an adventure map, you may need to rejoin it.");
         }
         public override void Unload(bool shutdown) {
             Command.Unregister(tempBlockCmd);
@@ -615,6 +621,8 @@ namespace PluginCCS {
             Command.Unregister(updateOsScriptCmd);
             Command.Unregister(downloadScriptCmd);
 
+            foreach (Command cmd in cmds) { Command.Unregister(cmd); }
+
             OnPlayerFinishConnectingEvent.Unregister(OnPlayerFinishConnecting);
             OnInfoSwapEvent.Unregister(OnInfoSwap);
             OnJoiningLevelEvent.Unregister(OnJoiningLevel);
@@ -627,6 +635,7 @@ namespace PluginCCS {
 
             OnPlayerMoveEvent.Unregister(OnPlayerMove);
 
+            OnPlayerClickEvent.Unregister(OnPlayerClick);
 
             SaveAllPlayerData();
             scriptDataAtPlayer.Clear();
@@ -664,6 +673,7 @@ namespace PluginCCS {
             ScriptData data;
             if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) { return; }
             data.WriteSavedStringsToDisk();
+            data.hotkeys.keybinds.SaveBinds();
         }
         static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             Script.OnJoiningLevel(p, lvl, ref canJoin);
@@ -676,6 +686,10 @@ namespace PluginCCS {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
                 if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", ScriptRunner.CpeMessagePriority); }
             }
+            p.SendCpeMessage(CpeMessageType.BigAnnouncement, "");
+            p.SendCpeMessage(CpeMessageType.Announcement, "");
+            p.SendCpeMessage(CpeMessageType.SmallAnnouncement, "");
+
             ScriptData data;
             if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnPlayerSpawning(); }
         }
@@ -714,6 +728,36 @@ namespace PluginCCS {
             }
         }
 
+        static void OnPlayerClick
+        (Player p,
+        MouseButton button, MouseAction action,
+        ushort yaw, ushort pitch,
+        byte entity, ushort x, ushort y, ushort z,
+        TargetBlockFace face) {
+
+            if (action != MouseAction.Pressed) { return; }
+            if (p.level.Config.Deletable || p.level.Config.Buildable) { return; }
+
+            ScriptData data = GetScriptData(p);
+
+            if (data.clickEventAsync == null && data.clickEvent == null) { return; }
+
+            Vec3S32 coords = new Vec3S32(x, y, z);
+            ClickInfo clickInfo = new ClickInfo(button, action, yaw, pitch, entity, x, y, z, face);
+
+            if (data.clickEvent != null) {
+                DoClick(p, data.clickEvent, coords, clickInfo);
+            }
+            if (data.clickEventAsync != null) {
+                DoClick(p, data.clickEventAsync, coords, clickInfo);
+            }
+        }
+        static void DoClick(Player p, Sevent sevent, Vec3S32 coords, ClickInfo clickInfo) {
+            ScriptRunner.PerformScriptOnNewThread(p, sevent.scriptName, sevent.scriptLabel, sevent.perms, sevent.async,
+                sevent.GetCommandData(coords),
+                clickInfo);
+        }
+
     }
 
     public class CmdScript : Command2 {
@@ -749,7 +793,7 @@ namespace PluginCCS {
 
             string startLabel = args[1 + argsOffset];
             bool repeatable = (args.Length > 2 + argsOffset && args[2 + argsOffset] == "repeatable");
-            ScriptRunner.PerformScript(p, scriptName, startLabel, false, repeatable, data);
+            ScriptRunner.PerformScript(p, scriptName, startLabel, RunnerPerms.Staff, repeatable, data);
         }
 
         public const string labelHelp = "%HLabels are case sensitive and must begin with #";
@@ -787,7 +831,7 @@ namespace PluginCCS {
             string startLabel = args[0];
             bool repeatable = (args.Length > 1 && args[1] == "repeatable");
 
-            ScriptRunner.PerformScript(p, scriptName, startLabel, true, repeatable, data);
+            ScriptRunner.PerformScript(p, scriptName, startLabel, new RunnerPerms(p.level), repeatable, data);
         }
 
         public override void Help(Player p) {
@@ -981,11 +1025,6 @@ namespace PluginCCS {
                 return scriptLines;
             }
         }
-        //Fills in the actions
-        static void CompileError(Player p, string scriptName, int lineNumber, string message, params object[] args) {
-            p.Message("&cError compiling script {0} on line {1}:", scriptName, lineNumber);
-            p.Message("&c"+ message, args);
-        }
         bool AddFile(Player p, string scriptName, string[] scriptLines) {
 
             Uses uses = new Uses(); //This lives on in the ScriptLines added from this file
@@ -1018,7 +1057,7 @@ namespace PluginCCS {
                     if (includeLines == null) { return false; }
                     if (!CanInclude(p, scriptName, includeScriptName, lineNumber, includeLines)) { return false; }
 
-                    AddFile(p, includeScriptName, includeLines);
+                    if (!AddFile(p, includeScriptName, includeLines)) { return false; }
                     continue;
                 }
 
@@ -1029,7 +1068,7 @@ namespace PluginCCS {
                     continue;
                 }
 
-                ScriptLine scriptLine = new ScriptLine(name, uses); //This using is okay because modifying it later will modify the structure this points to
+                ScriptLine scriptLine = new ScriptLine(scriptName, uses); //This uses is okay because modifying it later will modify the structure this points to
                 scriptLine.lineNumber = lineNumber;
                 string lineTrimmedCondition = line;
                 if (line.StartsWith("if")) {
@@ -1047,13 +1086,22 @@ namespace PluginCCS {
                     } else if (logic == "if") {
                         scriptLine.conditionLogic = ScriptLine.ConditionLogic.If;
                     } else {
-                        CompileError(p, scriptName, lineNumber, "Logic \"" + logic + "\" is not recognized."); return false;
+                        CompileError(p, scriptName, lineNumber, "Logic \"" + logic + "\" is not recognized.");
+                        return false;
                     }
 
                     if (type == "item") {
                         //[if]0 [item]1 [SKULL_COIN]2 [msg you have skull]3
                         scriptLine.conditionType = ScriptLine.ConditionType.Item;
-                        string[] ugh = line.SplitSpaces(4); if (ugh.Length < 4) { LackingArgs(); return false; }
+                        string[] ugh = line.SplitSpaces(4);
+                        if (ugh.Length < 4) { LackingArgs(); return false; }
+                        scriptLine.conditionArgs = ugh[2];
+                        lineTrimmedCondition = ugh[3];
+                    } else if (type == "label") {
+                        //[if]0 [label]1 [#specialAction]2 [msg The label #specialAction exists]3
+                        scriptLine.conditionType = ScriptLine.ConditionType.Label;
+                        string[] ugh = line.SplitSpaces(4);
+                        if (ugh.Length < 4) { LackingArgs(); return false; }
                         scriptLine.conditionArgs = ugh[2];
                         lineTrimmedCondition = ugh[3];
                     } else {
@@ -1069,6 +1117,7 @@ namespace PluginCCS {
                 scriptLine.actionType = ScriptActions.GetAction(actionType);
                 if (scriptLine.actionType == null) {
                     CompileError(p, scriptName, lineNumber, "unknown Action \"" + actionType + "\" detected.");
+                    return false;
                 }
 
                 if (lineTrimmedCondition.Split(new char[] { ' ' }).Length > 1) {
@@ -1083,6 +1132,10 @@ namespace PluginCCS {
 
             }
             return true;
+        }
+        static void CompileError(Player p, string scriptName, int lineNumber, string message, params object[] args) {
+            p.Message("&cError compiling script {0} on line {1}:", scriptName, lineNumber);
+            p.Message("&c" + message, args);
         }
 
         public static void Update(Player p, string scriptName, byte[] data) {
@@ -1101,13 +1154,14 @@ namespace PluginCCS {
             string filePath = PATH + lvl.name + EXT;
             if (!File.Exists(filePath)) { return; }
 
-            //TODO: This can probably be simplified to avoid running an entire command
+
             CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
             ScriptData scriptData = Core.GetScriptData(p);
-            scriptData.SetString("denyAccess", "", false, lvl.name);
-            Command.Find("script").Use(p, lvl.name + " #accessControl", data2); //not using p.HandleCommand because it needs to all be in one thread
+            scriptData.SetString("denyAccess", "", RunnerPerms.Staff, lvl.name);
 
-            if (scriptData.GetString("denyAccess", false, lvl.name).ToLower() == "true") {
+            ScriptRunner.PerformScript(p, lvl.name, "#accessControl", RunnerPerms.Staff, false, data2);
+
+            if (scriptData.GetString("denyAccess", RunnerPerms.Staff, lvl.name).ToLower() == "true") {
                 canJoin = false;
                 lvl.AutoUnload();
             }
@@ -1214,8 +1268,7 @@ namespace PluginCCS {
                 if (!line.StartsWith(PREFIX)) { return false; }
                 line = line.Substring(PREFIX.Length);
 
-                if (line == CEF) { cef = true; }
-                else if (line == QUIT_RESETS_RUNARGS) { quitResetsRunArgs = true; }
+                if (line == CEF) { cef = true; } else if (line == QUIT_RESETS_RUNARGS) { quitResetsRunArgs = true; }
 
                 return true;
             }
@@ -1235,7 +1288,7 @@ namespace PluginCCS {
         public string actionArgs = "";
 
         public enum ConditionLogic { None, If, IfNot }
-        public enum ConditionType { Invalid, Item, Val }
+        public enum ConditionType { Invalid, Item, Val, Label }
 
         public ConditionLogic conditionLogic = ConditionLogic.None;
         public ConditionType conditionType = ConditionType.Invalid;
@@ -1248,7 +1301,7 @@ namespace PluginCCS {
 
         private ScriptRunner() { }
 
-        public static ScriptRunner Create(Player p, string scriptName, bool isOS, CommandData data, bool repeatable, string thisBool, string[] runArgs) {
+        public static ScriptRunner Create(Player p, string scriptName, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, ClickInfo clickInfo = null) {
             ScriptRunner runner = new ScriptRunner();
 
             runner.script = Script.Get(p, scriptName);
@@ -1259,24 +1312,52 @@ namespace PluginCCS {
             runner.startingLevel = p.level;
             runner.startingLevelName = p.level.name;
             runner.scriptName = scriptName;
-            runner.isOS = isOS;
+            runner.perms = perms;
             runner.data = data;
             runner.repeatable = repeatable;
             runner.thisBool = thisBool;
             runner.runArgs = runArgs;
-
+            runner.clickInfo = clickInfo;
             return runner;
         }
     }
+
+
     //Fields
+    public class RunnerPerms {
+
+        public static RunnerPerms Staff = new RunnerPerms(true, true, true, true);
+
+        public readonly bool canSave;
+        public readonly bool staffPermission;
+        public readonly bool canRunMessageBlockRestricted;
+        public readonly bool canGiveAwards;
+        public readonly int actionLimit;
+        public readonly int newThreadLimit;
+
+        const int actionsNormal = 61360;
+        const int actionsMax = actionsNormal * 4;
+        const int newThreadLimitNormal = 10;
+        const int newThreadLimitMax = newThreadLimitNormal * 2;
+        public RunnerPerms(bool canSave, bool runAsNobody, bool canRunMessageBlockRestricted, bool canGiveAwards) {
+            this.canSave = canSave;
+            this.staffPermission = runAsNobody;
+            this.canRunMessageBlockRestricted = canRunMessageBlockRestricted;
+            this.canGiveAwards = canGiveAwards;
+
+            actionLimit = runAsNobody ? actionsMax : actionsNormal;
+            newThreadLimit = runAsNobody ? newThreadLimitMax : newThreadLimitNormal;
+        }
+        public RunnerPerms(Level lvl) {
+            canSave = lvl.GetExtraPropBool("save_player_script_data");
+
+            actionLimit = staffPermission ? actionsMax : actionsNormal;
+            newThreadLimit = staffPermission ? newThreadLimitMax : newThreadLimitNormal;
+        }
+    }
     public partial class ScriptRunner {
 
         public static char[] pipeChar = new char[] { '|' };
-
-        const int actionLimit = 61360 * 4;
-        const int actionLimitOS = 61360;
-        const int newThreadLimit = 20;
-        const int newThreadLimitOS = 10;
 
         const CpeMessageType bot1 = CpeMessageType.BottomRight3;
         const CpeMessageType bot2 = CpeMessageType.BottomRight2;
@@ -1308,19 +1389,25 @@ namespace PluginCCS {
         public string startingLevelName;
         public string scriptName;
         public string startLabel;
-        public bool isOS = false;
-        public bool repeatable = false;
+        public RunnerPerms perms = null;
+
+        public bool repeatable;
+        public bool allowMBrepeat;
         public string thisBool;
+
         public CommandData data;
+        public ClickInfo clickInfo = null;
+
         public int actionIndex;
         public List<int> comebackToIndex = new List<int>();
         public List<Thread> newthreads = new List<Thread>();
         int actionCounter;
         int newThreadNestLevel;
-        public int lineNumber = -1;
 
         public static bool isCefMessage(string message) { return message.StartsWith("cef "); }
         public bool hasCef { get; private set; }
+        public bool hasMobile { get; private set; }
+        public bool hasWebclient { get; private set; }
 
         public int amountOfCharsInLastMessage = 0;
         public string[] runArgs;
@@ -1376,9 +1463,9 @@ namespace PluginCCS {
             return null;
         }
         public void SetEnv(string message) {
-            if (message.Length == 0) { Error(); p.Message("&cNo args provided for env"); return; }
+            if (message.Length == 0) { Error("No args provided for env"); return; }
             string[] args = message.SplitSpaces(2);
-            if (args.Length < 2) { Error(); p.Message("&cYou must provide an argument for type of env property to change as well as value"); return; }
+            if (args.Length < 2) { Error("You must provide an argument for type of env property to change as well as value"); return; }
             string prop = args[0];
             string valueString = args[1];
             byte? type = GetEnvColorType(prop);
@@ -1389,7 +1476,7 @@ namespace PluginCCS {
             if (prop.CaselessEq("weather")) {
                 type = GetEnvWeatherType(valueString);
                 if (type != null) { p.Session.SendSetWeather((byte)type); return; }
-                Error(); p.Message("&cEnv weather type \"{0}\" is not currently supported.", valueString);
+                Error("Env weather type \"{0}\" is not currently supported.", valueString);
                 return;
             }
 
@@ -1412,20 +1499,20 @@ namespace PluginCCS {
             }
 
 
-            Error(); p.Message("&cEnv property \"{0}\" is not currently supported.", prop);
+            Error("Env property \"{0}\" is not currently supported.", prop);
         }
 
 
         public bool ValidateCommand(out Command cmd) {
             cmd = null;
             Command.Search(ref cmdName, ref cmdArgs);
-            if (isOS && (cmdName.CaselessEq("runscript") || cmdName.CaselessEq(Core.runscriptCmd.name))) {
-                Error(); p.Message("%cCommand \"{0}\" is blacklisted from being used in scripts.");
+            if (!perms.staffPermission && (cmdName.CaselessEq("runscript") || cmdName.CaselessEq(Core.runscriptCmd.name))) {
+                Error("%cCommand \"{0}\" is blacklisted from being used in scripts.");
                 return false;
             }
             cmd = Command.Find(cmdName);
             if (cmd == null) {
-                Error(); p.Message("&cCould not find command \"{0}\"", cmdName);
+                Error("Could not find command \"{0}\"", cmdName);
                 return false;
             }
             return true;
@@ -1433,28 +1520,28 @@ namespace PluginCCS {
         CommandData GetCommandData() {
             CommandData data = default(CommandData);
             data.Context = CommandContext.MessageBlock;
-            data.Rank = isOS ? LevelPermission.Guest : LevelPermission.Nobody;
+            data.Rank = perms.staffPermission ? LevelPermission.Nobody : LevelPermission.Guest;
             data.MBCoords = this.data.MBCoords;
             return data;
         }
         public void DoCmd(Command cmd, string args) {
             CommandData data = GetCommandData();
-            if (isOS && cmd.MessageBlockRestricted) {
-                Error(); p.Message("&c\"{0}\" cannot be used in message blocks.", cmd.name);
-                p.Message("&cTherefore, it cannot be ran in a script.");
+            if (!perms.canRunMessageBlockRestricted && cmd.MessageBlockRestricted) {
+                Error("\"{0}\" cannot be used in message blocks.", cmd.name);
+                p.Message("Therefore, it cannot be ran in a script.");
                 return;
             }
-            CommandPerms perms = CommandPerms.Find(cmd.name);
-            if (!perms.UsableBy(data.Rank)) {
-                Error(); p.Message("&cOs scripts can only run commands with a permission of member or lower.", data.Rank);
-                p.Message("&cTherefore, \"{0}\" cannot be ran.", cmd.name);
+            CommandPerms commandPerms = CommandPerms.Find(cmd.name);
+            if (!commandPerms.UsableBy(data.Rank)) {
+                Error("OS scripts can only run commands with a permission of member or lower.", data.Rank);
+                p.Message("Therefore, \"{0}\" cannot be ran.", cmd.name);
                 return;
             }
             try {
                 cmd.Use(p, args, data);
             } catch (Exception ex) {
                 Logger.LogError(ex);
-                Error(); p.Message("&cAn error occured and command {0} could not be executed.", cmd.name);
+                Error("An error occured and command {0} could not be executed.", cmd.name);
             }
         }
         public void DoCmdNoPermChecks(Command cmd, string args) {
@@ -1462,7 +1549,7 @@ namespace PluginCCS {
                 cmd.Use(p, args, GetCommandData());
             } catch (Exception ex) {
                 Logger.LogError(ex);
-                Error(); p.Message("&cAn error occured and command {0} could not be executed.", cmd.name);
+                Error("An error occured and command {0} could not be executed.", cmd.name);
             }
         }
         public void DoNewThreadRunScript(ScriptRunner scriptRunner, string startLabel) {
@@ -1472,7 +1559,7 @@ namespace PluginCCS {
                             scriptRunner.Run(startLabel, newThreadNestLevel + 1);
                         } catch (Exception ex) {
                             Logger.LogError(ex);
-                            Error(); p.Message("&cAn error occured and newthread {0} could not be executed.", startLabel);
+                            Error("An error occured and newthread {0} could not be executed.", startLabel);
                         }
                     }
                 );
@@ -1541,14 +1628,14 @@ namespace PluginCCS {
             //reply 2|You: No thanks.|#replyNo
             //reply 3|You: Can you elaborate?|#replyElaborate
             string[] replyBits = args.Split(ScriptRunner.pipeChar, 3);
-            if (replyBits.Length < 3) { Error(); p.Message("&cNot enough arguments to setup a reply: \"" + args + "\"."); return; }
+            if (replyBits.Length < 3) { Error("Not enough arguments to setup a reply: \"" + args + "\"."); return; }
             int replyNum = -1;
-            if (!CommandParser.GetInt(p, replyBits[0], "Script setup reply number", ref replyNum, 1, CmdReplyTwo.maxReplyCount)) { Error(true); return; }
+            if (!CommandParser.GetInt(p, replyBits[0], "Script setup reply number", ref replyNum, 1, CmdReplyTwo.maxReplyCount)) { ErrorAbove(); return; }
             string replyMessage = replyBits[1];
             string labelName = replyBits[2];
 
             //replyNum is from 1-6 but replies is indexed from 0-5
-            scriptData.replies[replyNum - 1] = new ReplyData(scriptName, labelName, isOS, notifyPlayer);
+            scriptData.replies[replyNum - 1] = new ReplyData(scriptName, labelName, perms, notifyPlayer);
 
             CpeMessageType type = CmdReplyTwo.GetReplyMessageType(replyNum);
             p.SendCpeMessage(type, "%f[" + replyNum + "] " + replyMessage, CmdReplyTwo.replyPriority);
@@ -1566,26 +1653,50 @@ namespace PluginCCS {
     //Main body
     public partial class ScriptRunner {
 
-        public static void PerformScript(Player p, string scriptName, string startLabel, bool isOS, bool repeatable, CommandData data) {
+
+        /// <summary>
+        /// Ensure that when two scripts are ran at exactly the same time that should lock each other out, a lockout actually occurs
+        /// </summary>
+        static readonly object thisBoolLocker = new object();
+        public static void PerformScript(Player p, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
             //pass in string arguments after label saparated by | characters
             string[] runArgs = startLabel.Split('|');
             startLabel = runArgs[0];
             ReplaceUnderScoreWithSpaceInRunArgs(ref runArgs);
 
-            string thisBool = "RunningScript" + scriptName + startLabel;
-            if (!repeatable && p.Extras.GetBoolean(thisBool)) {
-                //p.Message("can't repeat while running");
-                return;
-            }
-            try {
+            string thisBool;
+            lock (thisBoolLocker) {
+                thisBool = "RunningScript" + scriptName + startLabel;
+                if (!repeatable && p.Extras.GetBoolean(thisBool)) {
+                    //p.Message("can't repeat while running");
+                    return;
+                }
                 if (!repeatable) p.Extras[thisBool] = true;
-                ScriptRunner scriptRunner = ScriptRunner.Create(p, scriptName, isOS, data, repeatable, thisBool, runArgs);
+            }
+
+            try {
+                ScriptRunner scriptRunner = ScriptRunner.Create(p, scriptName, perms, data, repeatable, thisBool, runArgs, clickInfo);
                 if (scriptRunner != null) {
                     scriptRunner.Run(startLabel);
                 }
             } finally {
                 if (!repeatable) p.Extras[thisBool] = false;
             }
+        }
+        public static void PerformScriptOnNewThread(Player p, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
+            Thread thread = new Thread(
+                    () => {
+                        try {
+                            PerformScript(p, scriptName, startLabel, perms, repeatable, data, clickInfo);
+                        } catch (Exception ex) {
+                            Logger.LogError(ex);
+                            p.Message("&WAn error occured: {0}", ex.Message);
+                        }
+                    }
+                );
+            thread.Name = "MCG_RunscriptNewThread";
+            thread.IsBackground = true;
+            thread.Start();
         }
 
         void Run(string startLabel, int newThreadNestLevel = 1) {
@@ -1594,8 +1705,8 @@ namespace PluginCCS {
             actionCounter = 0;
             this.newThreadNestLevel = newThreadNestLevel;
 
-            if (newThreadNestLevel > (isOS ? newThreadLimitOS : newThreadLimit)) {
-                p.Message("&cScript error: You cannot call a newthread from another newthread more than 10 times in a row.");
+            if (newThreadNestLevel > perms.newThreadLimit) {
+                p.Message("&cScript error: You cannot call a newthread from another newthread more than {0} times in a row.", perms.newThreadLimit);
                 return;
             }
             if (!script.GetLabel(startLabel, out actionIndex)) {
@@ -1613,17 +1724,15 @@ namespace PluginCCS {
 
             scriptData.AddActiveScript(this);
 
-            //if player has cef do:
-            //bool cef true
+
             if (p.Session.appName != null && p.Session.appName.Contains(" cef")) {
                 hasCef = true;
-                SetString("cef", "true");
             }
             if (p.Session.appName != null && (p.Session.appName.CaselessContains("mobile") || p.Session.appName.CaselessContains("android"))) {
-                SetString("mobile", "true");
+                hasMobile = true;
             }
             if (p.Session.appName != null && p.Session.appName.CaselessContains("web")) {
-                SetString("webclient", "true");
+                hasWebclient = true;
             }
 
             SetString("msgdelaymultiplier", "50");
@@ -1662,10 +1771,9 @@ namespace PluginCCS {
                 }
 
                 actionCounter++;
-                int limit = isOS ? actionLimitOS : actionLimit;
-                if (actionCounter > limit) {
-                    p.Message("&cScript error: Over {0} actions have been performed! Assuming endless loop and aborting.", limit);
-                    p.Message("&cLast line number ran was: {0}", lineNumber);
+                if (actionCounter > perms.actionLimit) {
+                    p.Message("&cScript error: Over {0} actions have been performed! Assuming endless loop and aborting.", perms.actionLimit);
+                    p.Message("&cLast line number ran was: {0}", curLine.lineNumber);
                     break;
                 }
             }
@@ -1683,7 +1791,14 @@ namespace PluginCCS {
 
             //handle item
             if (line.conditionType == ScriptLine.ConditionType.Item) {
-                doAction = scriptData.HasItem(parsedConditionArgs, isOS);
+                doAction = scriptData.HasItem(parsedConditionArgs, perms);
+                goto end;
+            }
+            //handle label
+            if (line.conditionType == ScriptLine.ConditionType.Label) {
+                //Allow labels to be passed with runargs, just ignore the runargs
+                string labelTrimmedRunArgs = parsedConditionArgs.Split(pipeChar)[0];
+                doAction = script.HasLabel(labelTrimmedRunArgs);
                 goto end;
             }
 
@@ -1699,34 +1814,42 @@ namespace PluginCCS {
             }
 
             if (ifBits.Length != 3) {
-                Error(); p.Message("&c\"" + parsedConditionArgs + "\" is not a valid if statement.");
-                p.Message("&cIf statement only accepts 1 argument or 3 arguments separated by |.");
+                Error("\"" + parsedConditionArgs + "\" is not a valid if statement.");
+                p.Message("If statement only accepts 1 argument or 3 arguments separated by |.");
                 return false;
             }
             string equality = ifBits[1];
             string comparedToArg = ifBits[2];
 
+            bool comparingLiteral = false;
+            if (IsQuoted(comparedToArg)) { comparingLiteral = true; goto handleString;  }
 
             //handle double
             double packagedoubleValue;
             double doubleValueCompared;
-            if (GetDouble(packageName, out packagedoubleValue, false) && GetDoubleRawOrVal(comparedToArg, "", out doubleValueCompared, false)) {
-                bool scriptError = false;
+            if (GetDouble(packageName, out packagedoubleValue) && GetDoubleRawOrVal(comparedToArg, out doubleValueCompared)) {
+                bool scriptError;
                 doAction = GetBoolResultFromIntCompare(packagedoubleValue, equality, doubleValueCompared, out scriptError);
-                if (scriptError) { Error(); p.Message("&cInvalid number comparison equality \"" + equality + "\"."); return false; }
+                if (scriptError) { Error("Invalid number comparison equality \"" + equality + "\"."); return false; }
                 goto end;
             }
 
-            //handle string
+
+        handleString:
+            string packageLiteral = GetString(packageName);
+            string comparedToLiteral;
+            if (comparingLiteral) { comparedToLiteral = EscapeQuotes(comparedToArg); }
+            else { comparedToLiteral = GetString(comparedToArg); }
+
             if (equality == "=") {
-
-                string comparedToLiteral;
-                if (IsQuoted(comparedToArg)) { comparedToLiteral = EscapeQuotes(comparedToArg); } else { comparedToLiteral = GetString(comparedToArg); }
-
-                doAction = GetString(packageName).CaselessEq(comparedToLiteral);
+                doAction = packageLiteral.CaselessEq(comparedToLiteral);
                 goto end;
             } else {
-                Error(); p.Message("You can only use = as a comparison equality when comparing non-numbers."); return false;
+                Error(
+                    "You tried to use \"{0}\" to compare {1} to {2}, but both values \"{3}\", \"{4}\" must be numbers to do that.",
+                    equality, packageName, comparedToArg, ScriptActions.Show.EscapeColorCodes(packageLiteral, "&S"), ScriptActions.Show.EscapeColorCodes(comparedToLiteral, "&S")
+                    );
+                return false;
             }
 
 
@@ -1741,7 +1864,7 @@ namespace PluginCCS {
         public ScriptLine curLine;
         void RunScriptLine(ScriptLine line) {
             actionIndex++;
-            lineNumber = line.lineNumber;
+            curLine = line;
             if (!ShouldDoLine(line)) { return; }
 
             args = ParseMessage(line.actionArgs);
@@ -1750,47 +1873,49 @@ namespace PluginCCS {
             cmdArgs = bits.Length > 1 ? bits[1] : "";
 
             if (scriptData.debugging) {
-                p.Message("&lDebug: {0}", line.actionType.ToString());
+                p.Message("&lDebug: {0}", line.actionType.name);
 
                 if (line.actionArgs != args) { p.Message("  {0}", line.actionArgs); }
                 p.Message("  {0}", args);
             }
-            curLine = line;
+
             line.actionType.Behavior(this);
 
             if (scriptData.debugging && scriptData.debuggingDelay > 0) { Thread.Sleep(scriptData.debuggingDelay); }
         }
 
-        public bool GetIntRawOrVal(string arg, string actionName, out int value) {
-            if (!Int32.TryParse(arg, out value)) {
-                string stringValue = GetString(arg);
-                if (stringValue == "") { stringValue = "0"; }
-                if (!Int32.TryParse(stringValue, out value)) { Error(); p.Message("&cAction {0} only takes integer values and \"{1}={2}\" is not an integer.", actionName, arg, stringValue); return false; }
-            }
-            return true;
+
+
+        public bool GetDoubleRawOrVal(string arg, out double value) {
+            if (double.TryParse(arg, out value)) { return true; } //If got raw value, done
+            if (GetDouble(arg, out value)) { return true; } //If got package value, done
+
+            return false;
+        }
+        public bool GetIntRawOrVal(string arg, out int value) {
+            if (Int32.TryParse(arg, out value)) { return true; } //If got raw value, done
+            if (GetInt(arg, out value)) { return true; } //If got package value, done
+
+            return false;
         }
 
-        public bool GetDoubleRawOrVal(string arg, string actionName, out double value, bool throwError = true) {
-            if (!double.TryParse(arg, out value)) {
-                string stringValue = GetString(arg);
-                if (stringValue == "") { stringValue = "0"; }
-                if (!double.TryParse(stringValue, out value)) {
-                    if (throwError) { Error(); p.Message("&cAction {0} only takes number values and \"{1}={2}\" is not a number.", actionName, arg, stringValue); }
-                    return false;
-                }
-            }
-            return true;
-        }
+        public bool GetDouble(string package, out double value) {
+            value = 0;
+            string packageValue = GetString(package);
+            if (packageValue.Length == 0) { return true; } //treat an empty or undefined value as 0
 
-        public bool GetDouble(string valName, out double doubleValue, bool throwError = true) {
-            doubleValue = 0;
-            string value = GetString(valName);
-            if (value.Length == 0) { return true; } //treat an empty or undefined value as 0
-            if (!double.TryParse(value, out doubleValue)) {
-                if (throwError) { Error(); p.Message("&c{0} = \"{1}\", therefore it cannot be used as a number.", valName, value); }
-                return false;
-            }
-            return true;
+            if (double.TryParse(packageValue, out value)) { return true; }
+            
+            return false;
+        }
+        public bool GetInt(string package, out int value) {
+            value = 0;
+            string packageValue = GetString(package);
+            if (packageValue.Length == 0) { return true; } //treat an empty or undefined value as 0
+
+            if (Int32.TryParse(packageValue, out value)) { return true; }
+
+            return false;
         }
 
         public void SetDouble(string valName, double value) {
@@ -1798,7 +1923,6 @@ namespace PluginCCS {
         }
 
         public string GetString(string stringName) {
-            if (p == null) { throw new System.Exception("Player null in GetString new pdb pls"); }
 
             if (stringName.Length > 6 && stringName.CaselessStarts("runArg")) {
                 int runArgIndex;
@@ -1808,48 +1932,28 @@ namespace PluginCCS {
             }
         fuckyou:
 
-            if (stringName.CaselessEq("mbx")) { return this.data.MBCoords.X.ToString(); }
-            if (stringName.CaselessEq("mby")) { return this.data.MBCoords.Y.ToString(); }
-            if (stringName.CaselessEq("mbz")) { return this.data.MBCoords.Z.ToString(); }
-            if (stringName.CaselessEq("playerx")) { return p.Pos.FeetBlockCoords.X.ToString(); }
-            if (stringName.CaselessEq("playery")) { return p.Pos.FeetBlockCoords.Y.ToString(); }
-            if (stringName.CaselessEq("playerz")) { return p.Pos.FeetBlockCoords.Z.ToString(); }
-            if (stringName.CaselessEq("playerpx")) { return p.Pos.X.ToString(); }
-            if (stringName.CaselessEq("playerpy")) { return (p.Pos.Y - Entities.CharacterHeight).ToString(); }
-            if (stringName.CaselessEq("playerpz")) { return p.Pos.Z.ToString(); }
-            if (stringName.CaselessEq("playeryaw")) { return Orientation.PackedToDegrees(p.Rot.RotY).ToString(); } //yaw
-            if (stringName.CaselessEq("playerpitch")) { return Orientation.PackedToDegrees(p.Rot.HeadX).ToString(); } //pitch
-
-            if (stringName.CaselessEq("msgdelay")) {
-                double msgDelayMultiplier = 0;
-                double.TryParse(GetString("msgDelayMultiplier"), out msgDelayMultiplier);
-                return (amountOfCharsInLastMessage * msgDelayMultiplier).ToString();
+            if (clickInfo != null) {
+                const string clickDataName = "click.";
+                if (stringName.CaselessStarts(clickDataName) && stringName.Length > clickDataName.Length) {
+                    string clickDataField = stringName.Substring(clickDataName.Length);
+                    string got = clickInfo.GetInfo(clickDataField);
+                    if (got == null) { Error("There is no click field \"{0}\"", clickDataField); return ""; }
+                    return got;
+                }
             }
 
-            if (stringName.CaselessEq("mbcoords")) {
-                return this.data.MBCoords.X + " " + this.data.MBCoords.Y + " " + this.data.MBCoords.Z;
-            }
-            //feet block coords
-            if (stringName.CaselessEq("playercoords")) {
-                Vec3S32 pos = p.Pos.FeetBlockCoords;
-                return pos.X + " " + pos.Y + " " + pos.Z;
-            }
-            //double coords for tempbot, particle, etc
-            if (stringName.CaselessEq("playercoordsdecimal")) {
-                double X = (p.Pos.X / 32f) - 0.5f;
-                double Y = ((p.Pos.Y - Entities.CharacterHeight) / 32f);
-                double Z = (p.Pos.Z / 32f) - 0.5f;
-                return X + " " + Y + " " + Z;
-            }
-            //tpp units
-            if (stringName.CaselessEq("playercoordsprecise")) { return p.Pos.X + " " + (p.Pos.Y - Entities.CharacterHeight) + " " + p.Pos.Z; }
+            ReadOnlyPackages.ReadOnlyPackage rop = ReadOnlyPackages.GetReadOnlyPackage(this, stringName);
+            if (rop != null) { return rop.Getter(this); }
 
-            if (stringName.CaselessEq("epochMS")) { return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(); }
 
-            return scriptData.GetString(stringName, isOS, scriptName);
+            return scriptData.GetString(stringName, perms, scriptName);
         }
         public void SetString(string stringName, string value) {
-            scriptData.SetString(stringName, value, isOS, scriptName);
+
+            ReadOnlyPackages.ReadOnlyPackage rop = ReadOnlyPackages.GetReadOnlyPackage(this, stringName);
+            if (rop != null) { Error("You cannot set a value to the preset package \"{0}\" because it is read only", rop.GetType().Name); return; }
+
+            scriptData.SetString(stringName, value, perms, scriptName);
         }
 
         public const char beginParseSymbol = '{';
@@ -1857,14 +1961,14 @@ namespace PluginCCS {
         const int maxRecursions = 32;
         string ParseMessage(string message, int recursions = 0) {
             if (recursions == 0) { message = ReplaceAts(message); } else if (recursions > maxRecursions) {
-                Error(); p.Message("More than {0} recursions occured while trying to unwrap package value(s) from: \"{1}\"", maxRecursions, message);
+                Error("More than {0} recursions occured while trying to unwrap package value(s) from: \"{1}\"", maxRecursions, message);
                 p.Message("To prevent an infinite loop, this is not allowed.");
                 return message;
             }
             int beginIndex = message.IndexOf(beginParseSymbol); int endIndex = message.IndexOf(endParseSymbol);
             if (beginIndex == -1 || endIndex == -1) { return message; }
             if (beginIndex > endIndex) {
-                Error(); p.Message("A closing curly bracket should not appear before an opening curly bracket."); return message;
+                Error("A closing curly bracket should not appear before an opening curly bracket."); return message;
             }
 
             //       oBI                         
@@ -1908,14 +2012,20 @@ namespace PluginCCS {
             return message;
         }
 
-        public void Error(bool above = false) {
-            if (above) { p.Message("&c↑ The above message came from a script error"); }
-            //else { p.Message("&cScript error:"); }
-            p.Message(ErrorTrace());
-            ScriptActions.Terminate.Do(this);
+        public void ErrorAbove() {
+            _Error("See above the dotted line.");
         }
-        string ErrorTrace() {
-            return String.Format("&cScript {0} errored at line {1}, which started from {2}", scriptName, lineNumber, startLabel);
+        public void Error(string reason, params object[] args) {
+            reason = string.Format(reason, args);
+            _Error(reason);
+        }
+        void _Error(string reason) {
+            p.Message("----------------");
+            p.Message("&WA script error has occured");
+            p.Message("&WOrigin: &S{0} {1}", scriptName, startLabel);
+            p.Message("&WCulprit: &S{0} at line {1}", curLine.scriptName, curLine.lineNumber);
+            p.Message("&WReason: &S{0}", reason);
+            ScriptActions.Terminate.Do(this);
         }
     }
 
@@ -1931,7 +2041,7 @@ namespace PluginCCS {
                 //Log.Msg("{0} becomes {1}", t.Name, t.Name.Substring("Action".Length).ToLowerInvariant());
                 try {
                     scriptAction = (ScriptAction)Activator.CreateInstance(t);
-                } catch (MemberAccessException e) {
+                } catch (MemberAccessException) {
                     //Catch exception when trying to create abstract instances. Do nothing in this case
                     continue;
                 }
@@ -1949,6 +2059,61 @@ namespace PluginCCS {
             public abstract string[] documentation { get; }
             public abstract string name { get; }
             public abstract void Behavior(ScriptRunner run);
+
+            void NumberConversionFailure(ScriptRunner run, string arg, string numType) {
+                string stringValue = run.GetString(arg);
+                run.Error("Action {0} only takes {1} values but {2} has the value of \"{3}\".",
+                    name, numType, arg, Show.EscapeColorCodes(stringValue, "&S"));
+            }
+
+
+            protected bool GetDoubleRawOrVal(ScriptRunner run, string arg, out double value) {
+                if (run.GetDoubleRawOrVal(arg, out value)) { return true; }
+
+                NumberConversionFailure(run, arg, "number");
+                return false;
+            }
+            protected bool GetIntRawOrVal(ScriptRunner run, string arg, out int value) {
+                if (run.GetIntRawOrVal(arg, out value)) { return true; }
+
+                NumberConversionFailure(run, arg, "integer");
+                return false;
+            }
+
+            protected bool GetDouble(ScriptRunner run, string arg, out double value) {
+                if (run.GetDouble(arg, out value)) { return true; }
+
+                NumberConversionFailure(run, arg, "number");
+                return false;
+            }
+            protected bool GetInt(ScriptRunner run, string arg, out int value) {
+                if (run.GetInt(arg, out value)) { return true; }
+
+                NumberConversionFailure(run, arg, "integer");
+                return false;
+            }
+
+
+            protected bool GetCoordsFloat(ScriptRunner run, out Vec3F32 coords) {
+                string[] stringCoords = run.args.SplitSpaces();
+                coords = new Vec3F32();
+                if (stringCoords.Length < 3) { run.Error("Not enough arguments for {0}", name); return false; }
+                if (!CommandParser2.GetCoords(run.p, stringCoords, 0, ref coords)) { run.ErrorAbove(); return false; }
+                return true;
+            }
+            protected bool GetCoords(ScriptRunner run, out Vec3S32 coords) {
+                string[] stringCoords = run.args.SplitSpaces();
+                coords = new Vec3S32();
+                if (stringCoords.Length < 3) { run.Error("Not enough arguments for {0}", name); return false; }
+                if (!CommandParser.GetCoords(run.p, stringCoords, 0, ref coords)) { run.ErrorAbove(); return false; }
+                return true;
+            }
+            protected static void SendMOTD(ScriptRunner run, string motd) {
+                run.p.Send(Packet.Motd(run.p, motd));
+                if (run.p.Supports(CpeExt.HackControl)) {
+                    run.p.Send(Hacks.MakeHackControl(run.p, motd));
+                }
+            }
         }
 
         public class Message : ScriptAction {
@@ -1981,7 +2146,7 @@ namespace PluginCCS {
             public override string name => "cpemsg";
 
             public override void Behavior(ScriptRunner run) {
-                if (run.cmdName == "") { run.Error(); run.p.Message("&cNot enough arguments for cpemsg"); return; }
+                if (run.cmdName == "") { run.Error("Not enough arguments for cpemsg"); return; }
                 CpeMessageType type = ScriptRunner.GetCpeMessageType(run.cmdName);
                 if (type == CpeMessageType.Announcement || type == CpeMessageType.BigAnnouncement || type == CpeMessageType.SmallAnnouncement) {
                     run.amountOfCharsInLastMessage = run.cmdArgs.Length;
@@ -2000,7 +2165,7 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 int delay;
-                if (!run.GetIntRawOrVal(run.cmdName, "Delay", out delay)) { return; }
+                if (!GetIntRawOrVal(run, run.cmdName, out delay)) { return; }
                 Thread.Sleep(delay);
             }
         }
@@ -2019,7 +2184,7 @@ namespace PluginCCS {
                 run.TryReplaceRunArgs(newRunArgs);
 
                 if (!run.script.GetLabel(newRunArgs[0], out run.actionIndex)) {
-                    run.Error(); run.p.Message("&cUnknown label \"" + newRunArgs[0] + "\".");
+                    run.Error("Unknown label \"" + newRunArgs[0] + "\".");
                     run.p.Message(CmdScript.labelHelp);
                 }
             }
@@ -2030,7 +2195,7 @@ namespace PluginCCS {
                 "[#label]",
                 "    This is the same as jump, but with a big exception:",
                 "    If you use \"goto\" in a label that you called with the \"call\" Action, then the script will not come back to run what was after the call.",
-                "    In other words, this performs a jump and then clears the call stack",
+                "    In other words, this performs a jump and clears the call stack",
             };
 
             public override string name => "goto";
@@ -2096,6 +2261,7 @@ namespace PluginCCS {
                 }
                 //p.Message("Putting thisBool to false and quitting the entire script.");
                 if (!run.repeatable) run.p.Extras[run.thisBool] = false;
+                if (run.allowMBrepeat) { run.p.prevMsg = ""; } //Allow repeat if AllowMBRepeat action was called
             }
         }
 
@@ -2110,7 +2276,7 @@ namespace PluginCCS {
             public override string name => "newthread";
 
             public override void Behavior(ScriptRunner run) {
-                if (run.cmdName.Length == 0) { run.Error(); run.p.Message("&cPlease specify a label and or runArgs for the newthread to run with."); return; }
+                if (run.cmdName.Length == 0) { run.Error("Please specify a label and or runArgs for the newthread to run with."); return; }
 
                 string[] newThreadRunArgs = (run.cmdName).Split(ScriptRunner.pipeChar);
                 string newThreadLabel = newThreadRunArgs[0];
@@ -2123,10 +2289,28 @@ namespace PluginCCS {
                     ScriptRunner.ReplaceUnderScoreWithSpaceInRunArgs(ref newThreadRunArgs);
                 }
 
-                if (!run.script.HasLabel(newThreadLabel)) { run.Error(); run.p.Message("&cUnknown newthread label \"" + newThreadLabel + "\"."); return; }
-                ScriptRunner scriptRunner = ScriptRunner.Create(run.p, run.scriptName, run.isOS, run.data, run.repeatable, run.thisBool, newThreadRunArgs);
-                if (scriptRunner == null) { run.Error(); return; }
+                if (!run.script.HasLabel(newThreadLabel)) { run.Error("Unknown newthread label \"" + newThreadLabel + "\"."); return; }
+                ScriptRunner scriptRunner = ScriptRunner.Create(run.p, run.scriptName, run.perms, run.data, run.repeatable, run.thisBool, newThreadRunArgs);
+                if (scriptRunner == null) { run.Error("Could not compile script or could not create script runner instance for newthread"); return; }
                 run.DoNewThreadRunScript(scriptRunner, newThreadLabel);
+            }
+        }
+
+        public class Cmd : ScriptAction {
+            public override string[] documentation => new string[] {
+                "[command] <command arguments>",
+                "    Runs the given command with the given arguments.",
+                "    You can use @p and @nick to substitute player names just like in msg.",
+            };
+
+            public override string name => "cmd";
+
+            public override void Behavior(ScriptRunner run) {
+                Command cmd = null;
+                if (!run.ValidateCommand(out cmd)) {
+                    return;
+                }
+                run.DoCmd(cmd, run.cmdArgs);
             }
         }
 
@@ -2160,16 +2344,19 @@ namespace PluginCCS {
                 try {
                     result = Op(a, b);
                 } catch (DivideByZeroException) {
-                    run.Error(); run.p.Message("&cCannot divide {0}={1} by {2}={3} because division by zero does not result in a real number.", run.cmdName, a, run.cmdArgs, b);
+                    run.Error("Cannot divide {0}={1} by {2}={3} because division by zero does not result in a real number.", run.cmdName, a, run.cmdArgs, b);
                     return;
                 }
                 run.SetDouble(run.cmdName, result);
             }
-            static bool ValidateNumberOperation(ScriptRunner run, out double doubleValue, out double doubleValue2) {
+            bool ValidateNumberOperation(ScriptRunner run, out double doubleValue, out double doubleValue2) {
                 doubleValue2 = 0;
-                if (!run.GetDouble(run.cmdName, out doubleValue)) { return false; }
-                if (double.TryParse(run.cmdArgs, out doubleValue2)) { return true; } //second arg is already a number, return its value
-                return run.GetDouble(run.cmdArgs, out doubleValue2); //second arg is not a number and is therefore assumed to be a valueName. Try to get the value of the valueName.
+                if (!GetDouble(run, run.cmdName, out doubleValue)) {
+                    return false;
+                }
+                if (!GetDoubleRawOrVal(run, run.cmdArgs, out doubleValue2)) { return false; }
+
+                return true;
             }
             protected abstract double Op(double a, double b);
         }
@@ -2324,11 +2511,11 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
-                if (bits.Length < 3) { run.Error(); run.p.Message("&cNot enough arguments for SetRandRange action"); return; }
+                if (bits.Length < 3) { run.Error("Not enough arguments for SetRandRange action"); return; }
                 int min, max;
-                if (!run.GetIntRawOrVal(bits[1], "SetRandRange", out min)) { return; }
-                if (!run.GetIntRawOrVal(bits[2], "SetRandRange", out max)) { return; }
-                if (min > max) { run.Error(); run.p.Message("&cMin value for SetRandRange must be smaller than max value."); return; }
+                if (!GetIntRawOrVal(run, bits[1], out min)) { return; }
+                if (!GetIntRawOrVal(run, bits[2], out max)) { return; }
+                if (min > max) { run.Error("Min value for SetRandRange must be smaller than max value."); return; }
                 run.SetDouble(bits[0], ScriptRunner.RandomRange(min, max));
             }
         }
@@ -2346,15 +2533,14 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
-                if (bits.Length < 3) { run.Error(); run.p.Message("&cNot enough arguments for SetRandRangeDecimal action"); return; }
+                if (bits.Length < 3) { run.Error("Not enough arguments for SetRandRangeDecimal action"); return; }
                 double min, max;
-                if (!run.GetDoubleRawOrVal(bits[1], "SetRandRangeDecimal", out min)) { return; }
-                if (!run.GetDoubleRawOrVal(bits[2], "SetRandRangeDecimal", out max)) { return; }
-                if (min > max) { run.Error(); run.p.Message("&cMin value for SetRandRangeDecimal must be smaller than max value."); return; }
+                if (!GetDoubleRawOrVal(run, bits[1], out min)) { return; }
+                if (!GetDoubleRawOrVal(run, bits[2], out max)) { return; }
+                if (min > max) { run.Error("Min value for SetRandRangeDecimal must be smaller than max value."); return; }
                 run.SetDouble(bits[0], ScriptRunner.RandomRangeDouble(min, max));
             }
         }
-
         public class SetRandList : ScriptAction {
             public override string[] documentation => new string[] {
                 "[package] [value1]|[value2]|[value3] etc...",
@@ -2368,7 +2554,7 @@ namespace PluginCCS {
             public override string name => "setrandlist";
 
             public override void Behavior(ScriptRunner run) {
-                if (run.cmdArgs == "") { run.Error(); run.p.Message("SetRandList requires a list of values to choose from separated by the | character."); return; }
+                if (run.cmdArgs == "") { run.Error("SetRandList requires a list of values to choose from separated by the | character."); return; }
                 run.SetString(run.cmdName, ScriptRunner.RandomEntry(run.cmdArgs.Split(ScriptRunner.pipeChar)));
             }
         }
@@ -2380,8 +2566,8 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 double value;
-                if (run.cmdName.Length == 0) { run.Error(); run.p.Message("&cNo value provided to round."); return; }
-                if (!run.GetDouble(run.cmdName, out value)) { return; }
+                if (run.cmdName.Length == 0) { run.Error("No value provided to round."); return; }
+                if (!GetDouble(run, run.cmdName, out value)) { return; }
                 run.SetDouble(run.cmdName, (int)Op(value));
             }
 
@@ -2445,8 +2631,26 @@ namespace PluginCCS {
                 bool saved;
 
                 foreach (string value in values) {
-                    run.p.Message("The value of &b{0} &Sis \"&o{1}&S\".", run.scriptData.ValidateStringName(value, run.isOS, run.scriptName, out saved).ToLower(), run.GetString(value));
+                    string shown = run.GetString(value);
+                    shown = EscapeColorCodes(shown, "&o");
+                    run.p.Message("The value of &b{0} &Sis \"&o{1}&S\".",
+                        run.scriptData.ValidateStringName(value, run.perms, run.scriptName, out saved).ToLower(),
+                        shown);
                 }
+            }
+            public static string EscapeColorCodes(string shown, string interrupt) {
+                shown = Colors.Escape(shown);
+                StringBuilder sb = new StringBuilder();
+                foreach (char c in shown) {
+                    if (c == '&') {
+                        sb.Append("%");
+                        //interrupt code
+                        sb.Append(interrupt);
+                    } else {
+                        sb.Append(c);
+                    }
+                }
+                return sb.ToString();
             }
         }
 
@@ -2462,24 +2666,6 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 run.p.HandleDeath(Block.Cobblestone, run.args, false, true);
-            }
-        }
-
-        public class Cmd : ScriptAction {
-            public override string[] documentation => new string[] {
-                "[command] <command arguments>",
-                "    Runs the given command with the given arguments.",
-                "    You can use @p and @nick to substitute player names just like in msg.",
-            };
-
-            public override string name => "cmd";
-
-            public override void Behavior(ScriptRunner run) {
-                Command cmd = null;
-                if (!run.ValidateCommand(out cmd)) {
-                    return;
-                }
-                run.DoCmd(cmd, run.cmdArgs);
             }
         }
 
@@ -2515,16 +2701,16 @@ namespace PluginCCS {
                     return;
                 }
                 if (run.cmdName.CaselessStarts("items")) {
-                    if (!run.isOS) { run.Error(); run.p.Message("&cCannot reset items in non-os script"); return; }
+                    if (!run.perms.canSave) { run.Error("Cannot reset items in non-os script"); return; }
                     run.scriptData.Reset(false, true, run.cmdArgs);
                     return;
                 }
                 if (run.cmdName.CaselessStarts("saved")) {
-                    if (run.isOS) { run.Error(); run.p.Message("&cCannot reset saved packages in os script (because there are none)"); return; }
+                    if (!run.perms.canSave) { run.Error("Cannot reset saved packages in os script"); return; }
                     run.scriptData.ResetSavedStrings(run.scriptName, run.cmdArgs);
                     return;
                 }
-                run.Error(); run.p.Message("&cYou must specify what type of data to reset");
+                run.Error("You must specify what type of data to reset");
             }
         }
 
@@ -2539,10 +2725,10 @@ namespace PluginCCS {
             public override string name => "item";
 
             public override void Behavior(ScriptRunner run) {
-                if (run.cmdArgs == "") { run.Error(); run.p.Message("&cNot enough arguments for Item action"); return; }
-                if (run.cmdName == "get" || run.cmdName == "give") { run.scriptData.GiveItem(run.cmdArgs, run.isOS); return; }
-                if (run.cmdName == "take" || run.cmdName == "remove") { run.scriptData.TakeItem(run.cmdArgs, run.isOS); return; }
-                run.Error(); run.p.Message("&cUnknown function for Item action: \"{0}\"", run.cmdName);
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for Item action"); return; }
+                if (run.cmdName == "get" || run.cmdName == "give") { run.scriptData.GiveItem(run.cmdArgs, run.perms); return; }
+                if (run.cmdName == "take" || run.cmdName == "remove") { run.scriptData.TakeItem(run.cmdArgs, run.perms); return; }
+                run.Error("Unknown function for Item action: \"{0}\"", run.cmdName);
             }
         }
 
@@ -2588,7 +2774,7 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 Vec3S32 coords;
-                if (!GetCoords(run, "Look", out coords)) { return; }
+                if (!GetCoords(run, out coords)) { return; }
                 ScriptRunner.LookAtCoords(run.p, coords);
             }
         }
@@ -2604,7 +2790,7 @@ namespace PluginCCS {
                 if (run.args == "") { run.scriptData.stareCoords = null; return; }
 
                 Vec3S32 coords;
-                if (!GetCoords(run, "Stare", out coords)) { return; }
+                if (!GetCoords(run, out coords)) { return; }
                 run.scriptData.stareCoords = coords;
             }
         }
@@ -2670,7 +2856,7 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 Vec3F32 coords;
-                if (!GetCoordsFloat(run, "SetSpawn", out coords)) { return; }
+                if (!GetCoordsFloat(run, out coords)) { return; }
 
                 Position pos = new Position();
                 pos.X = (int)(coords.X * 32) + 16;
@@ -2686,6 +2872,52 @@ namespace PluginCCS {
                     Entities.Spawn(run.p, run.p);
                 }
                 run.p.Message("Your spawnpoint was updated.");
+            }
+        }
+        public class SetDeathSpawn : ScriptAction {
+            public override string[] documentation => new string[] {
+                "[block coords]",
+                "    Changes where the player will spawn after dying.",
+            };
+
+            public override string name => "setdeathspawn";
+
+            public override void Behavior(ScriptRunner run) {
+                Vec3S32 coords;
+                if (!GetCoords(run, out coords)) { return; }
+                string[] bits = run.args.SplitSpaces();
+
+                if (bits.Length != 5) { run.Error("setdeathrespawn: You must provide x, y, z, yaw, and pitch"); return; }
+
+                int yaw = -1;
+                int pitch = -1;
+                if (!CommandParser.GetInt(run.p, bits[3], "yaw", ref yaw)) { return; }
+                if (!CommandParser.GetInt(run.p, bits[4], "pitch", ref pitch)) { return; }
+
+                //Orientation.DegreesToPacked
+
+                run.p.useCheckpointSpawn = true;
+
+                run.p.checkpointX = (ushort)coords.X;
+                run.p.checkpointY = (ushort)coords.Y;
+                run.p.checkpointZ = (ushort)coords.Z;
+
+                run.p.checkpointY++; //Set to "head" block"
+
+                run.p.checkpointRotX = Orientation.DegreesToPacked(yaw); //yaw
+                run.p.checkpointRotY = Orientation.DegreesToPacked(pitch); //pitch
+            }
+        }
+        public class AllowMBRepeat : ScriptAction {
+            public override string[] documentation => new string[] {
+                "",
+                "    Allows the next walk-through MB to be triggered, even if it's the same as the previously touched MB.",
+            };
+
+            public override string name => "allowmbrepeat";
+
+            public override void Behavior(ScriptRunner run) {
+                run.allowMBrepeat = true;
             }
         }
 
@@ -2774,10 +3006,10 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 double dist = 0;
-                if (!run.GetDoubleRawOrVal(run.cmdName, "Reach", out dist)) { return; }
+                if (!GetDoubleRawOrVal(run, run.cmdName, out dist)) { return; }
 
                 int packedDist = (int)(dist * 32);
-                if (packedDist > short.MaxValue) { run.Error(); run.p.Message("&cReach of \"{0}\", is too long. Max is 1023 blocks.", dist); return; }
+                if (packedDist > short.MaxValue) { run.Error("Reach of \"{0}\", is too long. Max is 1023 blocks.", dist); return; }
 
                 run.p.Send(Packet.ClickDistance((short)packedDist));
             }
@@ -2797,15 +3029,14 @@ namespace PluginCCS {
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces(4);
                 if (bits.Length < 4) {
-                    run.Error();
-                    run.p.Message("&cYou need to specify a package and x y z coordinates of the block to retrieve the ID of.");
+                    run.Error("You need to specify a package and x y z coordinates of the block to retrieve the ID of.");
                     return;
                 }
                 string packageName = bits[0];
                 string[] stringCoords = new string[] { bits[1], bits[2], bits[3] };
 
                 Vec3S32 coords = new Vec3S32();
-                if (!CommandParser.GetCoords(run.p, stringCoords, 0, ref coords)) { run.Error(true); }
+                if (!CommandParser.GetCoords(run.p, stringCoords, 0, ref coords)) { run.ErrorAbove(); }
                 run.SetString(packageName, ClientBlockID(run.p.level.GetBlock((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z)).ToString());
             }
             static BlockID ClientBlockID(BlockID serverBlockID) {
@@ -2840,24 +3071,24 @@ namespace PluginCCS {
                 // definehotkey this is put into slash input!|equals|alt shift
 
                 string[] bits = run.args.Split(ScriptRunner.pipeChar);
-                if (bits.Length < 2) { run.Error(); run.p.Message("&cNot enough arguments to define a hotkey: \"" + run.args + "\"."); return; }
+                if (bits.Length < 2) { run.Error("Not enough arguments to define a hotkey: \"" + run.args + "\"."); return; }
 
-                string content = bits[0];
+                string action = bits[0];
                 int keyCode = run.scriptData.hotkeys.GetKeyCode(bits[1]);
-                if (keyCode == 0) { run.Error(true); return; }
+                if (keyCode == 0) { run.ErrorAbove(); return; }
                 string modifierArgs = bits.Length > 2 ? bits[2].ToLower() : "";
                 byte modifiers = Hotkeys.GetModifiers(modifierArgs);
                 bool repeatable = modifierArgs.Contains("async");
 
 
-                string action = Hotkeys.FullAction(content, repeatable);
-                if (action.Length > NetUtils.StringSize) {
-                    run.Error();
-                    run.p.Message("&cThe hotkey that script is trying to send (&7{0}&c) is &e{1}&c characters long, but can only be &a{2}&c at most.", action, action.Length, NetUtils.StringSize);
-                    run.p.Message("You can remove &a{0}&S or more characters to fix this error.", action.Length - NetUtils.StringSize);
+                string fullAction = Hotkeys.FullAction(action, repeatable);
+                if (fullAction.Length > NetUtils.StringSize) {
+                    run.Error("The hotkey that script is trying to send (&e{0}&S) is &e{1}&S characters long, but can only be &a{2}&S at most.",
+                        fullAction, fullAction.Length, NetUtils.StringSize);
+                    run.p.Message("You can remove &a{0}&S or more characters to fix this error.", fullAction.Length - NetUtils.StringSize);
                     return;
                 }
-                run.scriptData.hotkeys.Define(action, keyCode, modifiers);
+                run.scriptData.hotkeys.Define(action, fullAction, keyCode, modifiers);
             }
         }
         public class UndefineHotkey : ScriptAction {
@@ -2876,7 +3107,7 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.Split(ScriptRunner.pipeChar);
-                int keyCode = run.scriptData.hotkeys.GetKeyCode(bits[0]); if (keyCode == 0) { run.Error(true); return; }
+                int keyCode = run.scriptData.hotkeys.GetKeyCode(bits[0]); if (keyCode == 0) { run.ErrorAbove(); return; }
 
                 byte modifiers = 0;
                 if (bits.Length > 1) {
@@ -2900,8 +3131,8 @@ namespace PluginCCS {
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
                 Vec3S32 coords = new Vec3S32();
-                if (bits.Length < 4) { run.Error(); run.p.Message("&cNot enough arguments for placeblock"); return; }
-                if (!CommandParser.GetCoords(run.p, bits, 1, ref coords)) { run.Error(true); return; }
+                if (bits.Length < 4) { run.Error("Not enough arguments for placeblock"); return; }
+                if (!CommandParser.GetCoords(run.p, bits, 1, ref coords)) { run.ErrorAbove(); return; }
 
                 BlockID block = 0;
                 if (!CommandParser.GetBlock(run.p, bits[0], out block)) { return; }
@@ -2909,16 +3140,14 @@ namespace PluginCCS {
 
                 if (!MCGalaxy.Group.GuestRank.CanPlace[block]) {
                     string blockName = Block.GetName(run.p, block);
-                    run.Error();
-                    run.p.Message("&cRank {0} &cis not allowed to use block \"{1}\". Therefore, script cannot place it.",
+                    run.Error("Rank {0} &Sis not allowed to use block \"{1}\". Therefore, script cannot place it.",
                         MCGalaxy.Group.GuestRank.ColoredName, blockName);
                     return;
                 }
                 BlockID deleted = run.startingLevel.GetBlock((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z);
                 if (!MCGalaxy.Group.GuestRank.CanDelete[deleted]) {
                     string blockName = Block.GetName(run.p, deleted);
-                    run.Error();
-                    run.p.Message("&cRank {0} &cis not allowed to delete block \"{1}\". Therefore, script cannot replace it.",
+                    run.Error("Rank {0} &Sis not allowed to delete block \"{1}\". Therefore, script cannot replace it.",
                         MCGalaxy.Group.GuestRank.ColoredName, blockName);
                     return;
                 }
@@ -2989,7 +3218,7 @@ namespace PluginCCS {
             public override string name => "award";
 
             public override void Behavior(ScriptRunner run) {
-                if (run.isOS) { run.p.Message("&WThe award action is not available in OS scripts."); return; }
+                if (!run.perms.canGiveAwards) { run.p.Message("&WThe award action is not available in OS scripts."); return; }
                 Naward.GiveTo(run.p, run.args);
             }
         }
@@ -3017,8 +3246,8 @@ namespace PluginCCS {
 
             public override string name => "setsplit";
 
-            public override void Behavior(ScriptRunner run) {
-                if (run.args == "") { run.Error(); run.p.Message("&cNot enough arguments for setsplit"); return; }
+            protected void _Behavior(ScriptRunner run, bool setArray) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
                 string str = run.cmdName;
                 System.Func<int, string> index = (i) => {
                     return String.Format("{0}[{1}]", str, i.ToString());
@@ -3027,10 +3256,12 @@ namespace PluginCCS {
                 string value = run.GetString(str);
 
                 if (run.cmdArgs == "") {
+                    run.SetString(str + ".Length", value.Length.ToString());
+
+                    if (!setArray) { return; }
                     for (int i = 0; i < value.Length; i++) {
                         run.SetString(index(i), value[i].ToString());
                     }
-                    run.SetString(str + ".Length", value.Length.ToString());
                     return;
                 }
 
@@ -3038,10 +3269,29 @@ namespace PluginCCS {
 
                 string[] split = value.Split(separator, StringSplitOptions.RemoveEmptyEntries);
 
+                run.SetString(str + ".Length", split.Length.ToString());
+
+                if (!setArray) { return; }
                 for (int i = 0; i < split.Length; i++) {
                     run.SetString(index(i), split[i]);
                 }
-                run.SetString(str + ".Length", split.Length.ToString());
+            }
+            public override void Behavior(ScriptRunner run) {
+                _Behavior(run, true);
+            }
+        }
+        public class SetLength : SetSplit {
+            public override string[] documentation => new string[] {
+                "[package] <splitter>",
+                "    Like setsplit, but just inserts the resulting length into [package].Length",
+                "    This is useful if you want to get the length of a string without wasting the memory",
+                "    and performance incurred by setsplit",
+            };
+
+            public override string name => "setlength";
+
+            public override void Behavior(ScriptRunner run) {
+                _Behavior(run, false);
             }
         }
 
@@ -3056,14 +3306,14 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] argBits = run.args.SplitSpaces();
-                if (argBits.Length < 5) { run.Error(); run.p.Message("&cNot enough arguments for setdirvector (expected 5)"); return; }
+                if (argBits.Length < 5) { run.Error("Not enough arguments for setdirvector (expected 5)"); return; }
                 string xResult = argBits[0];
                 string yResult = argBits[1];
                 string zResult = argBits[2];
                 double yaw;
-                if (!run.GetDoubleRawOrVal(argBits[3], "setdirvector", out yaw)) { return; }
+                if (!GetDoubleRawOrVal(run, argBits[3], out yaw)) { return; }
                 double pitch;
-                if (!run.GetDoubleRawOrVal(argBits[4], "setdirvector", out pitch)) { return; }
+                if (!GetDoubleRawOrVal(run, argBits[4], out pitch)) { return; }
                 double yawRad = yaw * (Math.PI / 180.0f);
                 double pitchRad = pitch * (Math.PI / 180.0f);
 
@@ -3082,29 +3332,220 @@ namespace PluginCCS {
                 return new Vec3F32((float)x, (float)y, (float)z);
             }
         }
+        public class RegisterClick : ScriptAction {
+            public override string[] documentation => new string[] {
+                "[label] <async>",
+                "    Registers a label that will be called whenever the player clicks.",
+                "    If the second argument is \"async\", it will allow the label to run again before the previous label is finished.",
+                "    Only works when map buildable and deletable are OFF.",
+                "    For more info, see the Click Label section.",
+            };
 
-        static bool GetCoords(ScriptRunner run, string actionName, out Vec3S32 coords) {
-            string[] stringCoords = run.args.SplitSpaces();
-            coords = new Vec3S32();
-            if (stringCoords.Length < 3) { run.Error(); run.p.Message("&cNot enough arguments for {0}", actionName); return false; }
-            if (!CommandParser.GetCoords(run.p, stringCoords, 0, ref coords)) { run.Error(true); return false; }
-            return true;
+            public override string name => "registerclick";
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args.Length == 0) {
+                    run.Error("You must provide a label to run on the click event.");
+                    return;
+                }
+                string[] args = run.args.SplitSpaces();
+                bool async = args.Length > 1 && args[1].CaselessEq("async");
+
+                Sevent sevent = new Sevent(run.perms, run.scriptName, args[0], async);
+
+                if (async) {
+                    run.scriptData.clickEventAsync = sevent;
+                } else {
+                    run.scriptData.clickEvent = sevent;
+                }
+            }
         }
-        static bool GetCoordsFloat(ScriptRunner run, string actionName, out Vec3F32 coords) {
-            string[] stringCoords = run.args.SplitSpaces();
-            coords = new Vec3F32();
-            if (stringCoords.Length < 3) { run.Error(); run.p.Message("&cNot enough arguments for {0}", actionName); return false; }
-            if (!CommandParser2.GetCoords(run.p, stringCoords, 0, ref coords)) { run.Error(true); return false; }
-            return true;
-        }
-        static void SendMOTD(ScriptRunner run, string motd) {
-            run.p.Send(Packet.Motd(run.p, motd));
-            if (run.p.Supports(CpeExt.HackControl)) {
-                run.p.Send(Hacks.MakeHackControl(run.p, motd));
+        public class Error : ScriptAction {
+            public override string[] documentation => new string[] {
+                "[message]",
+                "    Force the script to error with [message] as the reason.",
+                "    This is intended to be called if data or args haven't been setup correctly",
+                "    or if something happening was meant to be impossible.",
+                "    This is more useful than a simple msg because errors provide trace information that",
+                "    can help you debug where the issue came from.",
+                "    Note that this will also terminate the script.",
+            };
+
+            public override string name => "error";
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args.Length == 0) {
+                    run.Error("Action \"error\" was called with no specified reason.");
+                    return;
+                }
+                run.Error("Custom error: {0}", run.args);
             }
         }
     }
 
+    public static class ReadOnlyPackages {
+
+        public static Dictionary<string, ReadOnlyPackage> Dic = new Dictionary<string, ReadOnlyPackage>();
+        public static void PluginLoad() {
+            Dic = new Dictionary<string, ReadOnlyPackage>();
+            IEnumerable<Type> readonlyPackages = Wizardry.GetDerivedTypesFor(typeof(ReadOnlyPackage));
+
+            foreach (Type t in readonlyPackages) {
+                ReadOnlyPackage readonlyPackage;
+                try {
+                    readonlyPackage = (ReadOnlyPackage)Activator.CreateInstance(t);
+                } catch (MemberAccessException) {
+                    //Catch exception when trying to create abstract instances. Do nothing in this case
+                    continue;
+                }
+
+                Dic[t.Name.ToLower()] = readonlyPackage;
+            }
+        }
+        public static ReadOnlyPackage GetReadOnlyPackage(ScriptRunner run, string package) {
+            ReadOnlyPackage rop;
+            if (!Dic.TryGetValue(package.ToLower(), out rop)) { return null; }
+            return rop;
+        }
+
+        public abstract class ReadOnlyPackage {
+            public abstract string desc { get; }
+            public abstract string Getter(ScriptRunner run);
+        }
+
+        public class MBCoords : ReadOnlyPackage {
+            public override string desc => "The space-separated x y z coordinates of the message block that the script is ran from.";
+            public override string Getter(ScriptRunner run) {
+                return run.data.MBCoords.X + " " + run.data.MBCoords.Y + " " + run.data.MBCoords.Z;
+            }
+        }
+        public class MBX : ReadOnlyPackage {
+            public override string desc => "The x y and z coordinates of the message block that the script ran from.";
+            public override string Getter(ScriptRunner run) {
+                return run.data.MBCoords.X.ToString();
+            }
+        }
+        public class MBY : MBX {
+            public override string Getter(ScriptRunner run) {
+                return run.data.MBCoords.Y.ToString();
+            }
+        }
+        public class MBZ : MBX {
+            public override string Getter(ScriptRunner run) {
+                return run.data.MBCoords.Z.ToString();
+            }
+        }
+
+
+        public class PlayerCoords : ReadOnlyPackage {
+            public override string desc => "The space-separated block coordinates of the player.";
+            public override string Getter(ScriptRunner run) {
+                Vec3S32 pos = run.p.Pos.FeetBlockCoords;
+                return pos.X + " " + pos.Y + " " + pos.Z;
+            }
+        }
+        public class PlayerX : ReadOnlyPackage {
+            public override string desc => "The x y and z block coordinates of the player.";
+            public override string Getter(ScriptRunner run) {
+                return run.p.Pos.FeetBlockCoords.X.ToString();
+            }
+        }
+        public class PlayerY : PlayerX {
+            public override string Getter(ScriptRunner run) {
+                return run.p.Pos.FeetBlockCoords.Y.ToString();
+            }
+        }
+        public class PlayerZ : PlayerX {
+            public override string Getter(ScriptRunner run) {
+                return run.p.Pos.FeetBlockCoords.Z.ToString();
+            }
+        }
+        public class PlayerCoordsPrecise : ReadOnlyPackage {
+            public override string desc => "The space-separated precise block coordinates of the player (32 per-block, for /tp -precise).";
+            public override string Getter(ScriptRunner run) {
+                return run.p.Pos.X + " " + (run.p.Pos.Y - Entities.CharacterHeight) + " " + run.p.Pos.Z;
+            }
+        }
+        public class PlayerPX : ReadOnlyPackage {
+            public override string desc => "The precise x y and z coordinates of the player (32 per-block, for /tp -precise).";
+            public override string Getter(ScriptRunner run) {
+                return run.p.Pos.X.ToString();
+            }
+        }
+        public class PlayerPY : PlayerPX {
+            public override string Getter(ScriptRunner run) {
+                return (run.p.Pos.Y - Entities.CharacterHeight).ToString();
+            }
+        }
+        public class PlayerPZ : PlayerPX {
+            public override string Getter(ScriptRunner run) {
+                return run.p.Pos.Z.ToString();
+            }
+        }
+        public class PlayerCoordsDecimal : ReadOnlyPackage {
+            public override string desc => "The space-separated block coordinates of the player (decimal numbers, like used in /tempbot add).";
+            public override string Getter(ScriptRunner run) {
+                double X = (run.p.Pos.X / 32f) - 0.5f;
+                double Y = ((run.p.Pos.Y - Entities.CharacterHeight) / 32f);
+                double Z = (run.p.Pos.Z / 32f) - 0.5f;
+                return X + " " + Y + " " + Z;
+            }
+        }
+        public class PlayerYaw : ReadOnlyPackage {
+            public override string desc => "The player's camera yaw (left and right) in degrees.";
+            public override string Getter(ScriptRunner run) {
+                return Orientation.PackedToDegrees(run.p.Rot.RotY).ToString();
+            }
+        }
+        public class PlayerPitch : ReadOnlyPackage {
+            public override string desc => "The player's camera pitch (up and down) in degrees.";
+            public override string Getter(ScriptRunner run) {
+                return Orientation.PackedToDegrees(run.p.Rot.HeadX).ToString();
+            }
+        }
+        public class PlayerPronouns : ReadOnlyPackage {
+            public override string desc => "The name of the pronouns the player selected with /pronouns (default, they/them, etc).";
+            public override string Getter(ScriptRunner run) {
+                return run.p.pronouns.Name;
+            }
+        }
+
+
+        public class msgDelay : ReadOnlyPackage {
+            public override string desc => "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had.";
+            public override string Getter(ScriptRunner run) {
+                double msgDelayMultiplier = 0;
+                double.TryParse(run.GetString("msgDelayMultiplier"), out msgDelayMultiplier);
+                return (run.amountOfCharsInLastMessage * msgDelayMultiplier).ToString();
+            }
+        }
+        public class epochMS : ReadOnlyPackage {
+            public override string desc => "The number of milliseconds that have passed since 1970-01-01";
+            public override string Getter(ScriptRunner run) {
+                return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+            }
+        }
+
+        public class cef : ReadOnlyPackage {
+            public override string desc => "Has a value of \"true\" if the player has cef installed (https://github.com/SpiralP/classicube-cef-loader-plugin)";
+            public override string Getter(ScriptRunner run) {
+                return run.hasCef ? "true" : "";
+            }
+        }
+        public class webclient : ReadOnlyPackage {
+            public override string desc => "Has a value of \"true\" if the player is playing on the web client.";
+            public override string Getter(ScriptRunner run) {
+                return run.hasWebclient ? "true" : "";
+            }
+        }
+        public class mobile : ReadOnlyPackage {
+            public override string desc => "Has a value of \"true\" if the player is playing on a mobile device.";
+            public override string Getter(ScriptRunner run) {
+                return run.hasMobile ? "true" : "";
+            }
+        }
+
+    }
 
     public static class Docs {
 
@@ -3133,7 +3574,7 @@ namespace PluginCCS {
                 //Log.Msg("{0} becomes {1}", t.Name, t.Name.Substring("Action".Length).ToLowerInvariant());
                 try {
                     section = (Section)Activator.CreateInstance(t);
-                } catch (MemberAccessException e) {
+                } catch (MemberAccessException) {
                     //Catch exception when trying to create abstract instances. Do nothing in this case
                     continue;
                 }
@@ -3238,6 +3679,10 @@ namespace PluginCCS {
                 "if item [ITEM_NAME] [Action]",
                 "    The [Action] will only be performed if the player has the given item.",
                 "",
+                "if label [#label] [Action]",
+                "    The [Action] will only be performed if the [#label] exists in the script.",
+                "    For convenience's sake, runArgs passed along with [#label] are ignored when checking.",
+                "",
                 "For any of the above, \"if\" can be substituted for \"ifnot\" to reverse the logic.",
                 "    For example:",
                 "-       ifnot recognized msg Shady dude: I don't know you.",
@@ -3247,45 +3692,10 @@ namespace PluginCCS {
                 return body.ToList();
             }
         }
-        public class PresetSection : Section {
-            public override string Name => "Preset Packages";
+        public class ReadOnlySection : Section {
+            public override string Name => "Preset packages";
 
-            static string[] body = new string[] {
-                "Has a value of \"true\" if the player has cef installed (https://github.com/SpiralP/classicube-cef-loader-plugin)",
-                "    cef",
-                "Has a value of \"true\" if the player is playing on the web client",
-                "    webclient",
-                "Has a value of \"true\" if the player is playing on a mobile device",
-                "    mobile",
-                "The x, y, and z coordinates of the message block that the script is ran from. These will be zero if ran from reply, /input, or hotkeys.",
-                "    MBX",
-                "    MBY",
-                "    MBZ",
-                "The x, y, and z block coordinates of the player (integer numbers, like used in /tp).",
-                "    PlayerX",
-                "    PlayerY",
-                "    PlayerZ",
-                "The x, y, and z precise coordinates of the player (1 block = 32 precise units. These are used for the command /tp -precise)",
-                "    PlayerPX",
-                "    PlayerPY",
-                "    PlayerPZ",
-                "The player's camera yaw (left and right) and camera pitch (up and down) in degrees.",
-                "    PlayerYaw",
-                "    PlayerPitch",
-                "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had.",
-                "    msgDelay",
-                "A number that determines how much scaling is applied to msgDelay. The default is 50, and it resets every time the script is run (you can change this number).",
-                "    msgDelayMultiplier",
-                "",
-                "The coordinates of the message block that the script is ran from. These will be zero if ran from reply, /input, or hotkeys.",
-                "    MBCoords",
-                "The block coordinates of the player (integer numbers, like used in /tp).",
-                "    PlayerCoords",
-                "The block coordinates of the player (decimal numbers, like used in /tempbot add)",
-                "    PlayerCoordsDecimal",
-                "The precise coordinates of the player (1 block = 32 units, like used in /tp -precise)",
-                "    PlayerCoordsPrecise",
-                "",
+            static string[] runArgDocs = new string[] {
                 "The arguments that are passed along with the #label when the script is run.",
                 "    runArg[number]",
                 "The 0th runArg is always the name of the label the script started from.",
@@ -3309,12 +3719,20 @@ namespace PluginCCS {
                 "-           ",
                 "-           msg You're always welcome here, cool cat.",
                 "-       quit",
-                "The number of milliseconds that have passed since 1970-01-01",
-                "    epochMS",
             };
 
             public override List<string> Body() {
-                return body.ToList();
+                List<string> body = new List<string>();
+
+                string lastDesc = null;
+                foreach (var pair in ReadOnlyPackages.Dic) {
+                    string curDesc = pair.Value.desc;
+                    if (curDesc != lastDesc) { body.Add(curDesc); }
+                    body.Add("    "+pair.Value.GetType().Name);
+                    lastDesc = curDesc;
+                }
+                body.AddRange(runArgDocs);
+                return body;
             }
         }
         public class LabelSection : Section {
@@ -3336,6 +3754,28 @@ namespace PluginCCS {
                 "    If that script exists and has the label #accessControl, that label will be ran.",
                 "    If the package \"denyAccess\" is set to \"true\" when the script quits, then the player will be denied access to the map.",
                 "    It's important to note that this runs /before/ player joins the map, so it cannot act as a spawn MB that initializes temporary packages or whatnot, since joining a map resets packages.",
+            };
+
+            public override List<string> Body() {
+                return body.ToList();
+            }
+        }
+        public class ClickSection : Section {
+            public override string Name => "Click Label";
+
+            static string[] body = new string[] {
+                "When a script is ran from registerclick,",
+                "there is a special group of packages that give you information about the click.",
+                "    click.button",
+                "        This can have the value of Left, Right, or Middle",
+                "    click.coords",
+                "        This is the block coordinates the player clicked. Any out-of-map coordinate means no block was targeted.",
+                "    click.yaw",
+                "    click.pitch",
+                "        The yaw and pitch of the player when they clicked. This is more precise than typical PlayerYaw and PlayerPitch",
+                "    click.face",
+                "        The side of the block the player clicked. This can have the value of:",
+                "        None, AwayX, TowardsX, AwayY, TowardsY, AwayZ, or TowardsZ",
             };
 
             public override List<string> Body() {
@@ -3430,10 +3870,78 @@ namespace PluginCCS {
         //public string replyMessage;
         public string scriptName;
         public string labelName;
-        public bool isOS;
+        public RunnerPerms perms;
         public bool notifyPlayer;
-        public ReplyData(string scriptName, string labelName, bool isOS, bool notifyPlayer) {
-            this.scriptName = scriptName; this.labelName = labelName; this.isOS = isOS; this.notifyPlayer = notifyPlayer;
+        public ReplyData(string scriptName, string labelName, RunnerPerms perms, bool notifyPlayer) {
+            this.scriptName = scriptName;
+            this.labelName = labelName;
+            this.perms = perms;
+            this.notifyPlayer = notifyPlayer;
+        }
+    }
+
+
+    /// <summary>
+    /// ScriptEvent
+    /// </summary>
+    public class Sevent {
+        public readonly RunnerPerms perms;
+        /// <summary>
+        /// What you would pass to Script.Get e.g. os/goodlyay+24 or shrine
+        /// </summary>
+        public readonly string scriptName;
+        public readonly string scriptLabel;
+        public readonly bool async;
+
+        public Sevent(RunnerPerms perms, string scriptName, string scriptLabel, bool async) {
+            this.perms = perms;
+            this.scriptName = scriptName;
+            this.scriptLabel = scriptLabel;
+            this.async = async;
+        }
+
+        public CommandData GetCommandData(Vec3S32 coords) {
+            CommandData data = default(CommandData);
+            data.Context = CommandContext.MessageBlock;
+            data.Rank = perms.staffPermission ? LevelPermission.Nobody : LevelPermission.Guest;
+            data.MBCoords = coords;
+            return data;
+        }
+    }
+    public class ClickInfo {
+        public readonly MouseButton button;
+        public readonly MouseAction action;
+        public readonly ushort x, y, z, yaw, pitch;
+        public readonly byte entity;
+        public readonly TargetBlockFace face;
+
+        public ClickInfo(
+        MouseButton button, MouseAction action,
+        ushort yaw, ushort pitch,
+        byte entity, ushort x, ushort y, ushort z,
+        TargetBlockFace face) {
+            this.button = button; this.action = action;
+            this.x = x; this.y = y; this.z = z;
+            this.yaw = yaw; this.pitch = pitch;
+            this.entity = entity;
+            this.face = face;
+        }
+
+        double PackedToDeg(ushort rot) {
+            double rotRad = rot * packed2Rad;
+            return rotRad * rad2Deg;
+        }
+        const double packed2Rad = (2 * Math.PI) / 65536.0;
+        const double rad2Deg = 180 / Math.PI;
+        public string GetInfo(string field) {
+            field = field.ToLower();
+            if (field == "button") { return button.ToString(); }
+            //if (field == "action") { return action.ToString(); } //Useless as action is always same
+            if (field == "coords") { return x+" "+y+" "+z; }
+            if (field == "yaw") { return PackedToDeg(yaw).ToString(); }
+            if (field == "pitch") { return PackedToDeg(pitch).ToString(); }
+            if (field == "face") { return face.ToString(); }
+            return null;
         }
     }
     public class ScriptData {
@@ -3446,6 +3954,10 @@ namespace PluginCCS {
         public string customMOTD = null;
         public Vec3S32? stareCoords = null;
         public ReplyData[] replies = new ReplyData[CmdReplyTwo.maxReplyCount];
+
+
+        public Sevent clickEvent = null;
+        public Sevent clickEventAsync = null;
 
         public string oldModel = null;
         public string newModel = null;
@@ -3481,6 +3993,7 @@ namespace PluginCCS {
             all.Sort((name1, name2) => string.Compare(name1.Key, name2.Key));
 
             foreach (var pair in all) {
+                string shown = ScriptActions.Show.EscapeColorCodes(pair.Value, "&o");
                 p.Message("The value of &b{0} &Sis \"&o{1}&S\".", pair.Key.ToLower(), pair.Value);
             }
         }
@@ -3540,6 +4053,8 @@ namespace PluginCCS {
             debugging = false;
             debuggingDelay = 0;
 
+            clickEvent = null;
+            clickEventAsync = null;
 
             ResetReplies();
             frozen = false;
@@ -3547,7 +4062,7 @@ namespace PluginCCS {
             Reset(true, true, "");
             oldModel = null;
             newModel = null;
-            hotkeys.UndefineAll();
+            hotkeys.OnPlayerSpawning();
             customMOTD = null;
         }
         public void Reset(bool packages, bool items, string matcher) {
@@ -3606,18 +4121,25 @@ namespace PluginCCS {
         ///in mod, strings are saved if they end with a period. Saved strings are always prefixed with the @scriptname_
         ///if they aren't prefixed with the script name, it is automatically added
         ///e.g. @egg2021_eggCount.
-        public string ValidateStringName(string stringName, bool isOS, string scriptName, out bool saved) {
+        public string ValidateStringName(string stringName, RunnerPerms perms, string scriptName, out bool saved) {
             saved = false;
-            if (isOS) { return stringName; }
+            if (!perms.canSave) { return stringName; }
             if (!stringName.EndsWith(savedMarker)) { return stringName; }
+
             saved = true;
-            if (stringName.StartsWith(prefixedMarker)) { return stringName; }
+
+            if (stringName.StartsWith(prefixedMarker)) {
+                // If script isn't ran as staff permission (/script), it cannot read or write saved packages belonging to other scripts
+                if (!perms.staffPermission) { saved = false; }
+                return stringName;
+            }
+            
             return (prefixedMarker + scriptName + "_" + stringName);
         }
 
-        public string GetString(string stringName, bool isOS, string scriptName) {
+        public string GetString(string stringName, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ValidateStringName(stringName, isOS, scriptName, out saved).ToUpper();
+            stringName = ValidateStringName(stringName, perms, scriptName, out saved).ToUpper();
 
             var dict = saved ? savedStrings : strings;
             string value = "";
@@ -3626,9 +4148,9 @@ namespace PluginCCS {
             //p.Message("getstring: saved is {0} and string {1} is being set to {2}", saved, stringName, value);
             return value;
         }
-        public void SetString(string stringName, string value, bool isOS, string scriptName) {
+        public void SetString(string stringName, string value, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ValidateStringName(stringName, isOS, scriptName, out saved).ToUpper();
+            stringName = ValidateStringName(stringName, perms, scriptName, out saved).ToUpper();
 
             var dict = saved ? savedStrings : strings;
             dict[stringName] = value;
@@ -3636,9 +4158,9 @@ namespace PluginCCS {
         }
 
 
-        public bool HasItem(string itemName, bool isOS) { return isOS ? OsHasItem(itemName) : ModHasItem(itemName); }
-        public void GiveItem(string itemName, bool isOS) { if (isOS) { OsGiveItem(itemName); } else { ModGiveItem(itemName); } }
-        public void TakeItem(string itemName, bool isOS) { if (isOS) { OsTakeItem(itemName); } else { ModTakeItem(itemName); } }
+        public bool HasItem(string itemName, RunnerPerms perms) { return !perms.canSave ? OsHasItem(itemName) : ModHasItem(itemName); }
+        public void GiveItem(string itemName, RunnerPerms perms) { if (!perms.canSave) { OsGiveItem(itemName); } else { ModGiveItem(itemName); } }
+        public void TakeItem(string itemName, RunnerPerms perms) { if (!perms.canSave) { OsTakeItem(itemName); } else { ModTakeItem(itemName); } }
 
         private bool ModHasItem(string itemName) {
             try {
@@ -3673,15 +4195,15 @@ namespace PluginCCS {
             p.Message("Notably, items are different from &T/stuff&S because they will disappear if you leave this map.");
         }
 
-        public bool OsHasItem(string itemName) { return osItems.ContainsKey(itemName.ToUpper()); }
-        public void OsGiveItem(string itemName) {
+        bool OsHasItem(string itemName) { return osItems.ContainsKey(itemName.ToUpper()); }
+        void OsGiveItem(string itemName) {
             itemName = itemName.ToUpper();
             if (osItems.ContainsKey(itemName)) { return; } //they already have this item
             osItems[itemName] = true;
             p.Message("You found an item: &a{0}&S!", itemName.Replace('_', ' '));
             p.Message("Check what items you have with &a/Items&S.");
         }
-        public void OsTakeItem(string itemName) {
+        void OsTakeItem(string itemName) {
             itemName = itemName.ToUpper();
             if (osItems.Remove(itemName)) {
                 p.Message("&a{0}&S was removed from your items.", itemName.Replace('_', ' '));
@@ -3692,7 +4214,12 @@ namespace PluginCCS {
     }
 
     public class Hotkeys {
-        private static readonly Dictionary<string, int> keyCodes
+
+        public static bool IsNumberKey(int keyCode) {
+            return keyCode >= 2 && keyCode <= 11;
+        }
+
+        static readonly Dictionary<string, int> keyCodes
             = new Dictionary<string, int>
         {
             { "NONE",         0   },
@@ -3828,6 +4355,27 @@ namespace PluginCCS {
             { "SLEEP",        223 }
         };
 
+        public static string GetKeyName(int keyCode) {
+            foreach (var pair in keyCodes) {
+                if (pair.Value == keyCode) { return pair.Key; }
+            }
+            return null;
+        }
+        public bool FindKeyCode(string name, out int keyCode) {
+            int matches;
+            keyCode = -1;
+            var pair = Matcher.Find(p, name, out matches, keyCodes,
+                                       null, pairNameGet => pairNameGet.Key, pairItemFormatter => pairItemFormatter.Key, "key names");
+
+            if (matches != 1) {
+                p.Message("&HYou can find a list of key names here:");
+                p.Message("https://notawesome.cc/docs/nas/keycodes.txt");
+                return false;
+            }
+
+            keyCode = pair.Value;
+            return true;
+        }
         public static string FullAction(string content, bool repeatable) {
             string cmd = repeatable ? "inputAsync" : "input";
             return "/" + cmd + " " + content + "◙";
@@ -3841,10 +4389,13 @@ namespace PluginCCS {
 
         private Player p;
         private List<Hotkey> hotkeys = new List<Hotkey>();
+        public Keybinds keybinds;
+        public bool anyConflict = false;
         public Hotkeys(Player p) {
             this.p = p;
+            keybinds = new Keybinds(p, this);
         }
-        public void UpdatePlayerReference(Player p) { this.p = p; }
+        public void UpdatePlayerReference(Player p) { this.p = p; keybinds.UpdatePlayerReference(p); }
 
         public int GetKeyCode(string keyName) {
             int code = 0;
@@ -3854,26 +4405,390 @@ namespace PluginCCS {
             }
             return code;
         }
+        public Hotkey GetHotKey(int keyCode) {
+            foreach (Hotkey hotkey in hotkeys) {
+                if (hotkey.keyCode == keyCode) { return hotkey; }
+            }
+            return null;
+        }
 
-        public void Define(string action, int keyCode, byte modifiers) {
-            p.Send(Packet.TextHotKey("na2 script hotkey", action, keyCode, modifiers, true));
-            hotkeys.Add(new Hotkey(keyCode, modifiers));
+        /// <summary>
+        /// Used in script action. Respects keybinds
+        /// </summary>
+        public void Define(string action, string fullAction, int keyCode, byte modifiers) {
+
+            Hotkey hotkey = new Hotkey(action, fullAction, keyCode, modifiers, keybinds);
+            foreach (Hotkey other in hotkeys) {
+                if (hotkey.Equals(other)) { return; } //This hotkey was already defined, don't add it to list of defined hotkeys
+            }
+            hotkeys.Add(hotkey);
+            hotkey.Define(p);
         }
+        /// <summary>
+        /// Used in script action. Respects keybinds
+        /// </summary>
         public void Undefine(int keyCode, byte modifiers) {
-            p.Send(Packet.TextHotKey("", "", keyCode, modifiers, true));
+            Hotkey hotkey = GetHotkey(keyCode, modifiers);
+            if (hotkey == null) {
+                return;
+            }
+            hotkey.Undefine(p);
         }
+
         public void UndefineAll() {
             foreach (Hotkey hotkey in hotkeys) {
-                Undefine(hotkey.keyCode, hotkey.modifiers);
+                hotkey.Undefine(p);
             }
+        }
+        public void DefineAll() {
+            foreach (Hotkey hotkey in hotkeys) {
+                hotkey.Define(p);
+            }
+        }
+        Hotkey GetHotkey(int keyCode, byte modifiers) {
+            foreach (Hotkey hotkey in hotkeys) {
+                if (hotkey.keyCode == keyCode && hotkey.modifiers == modifiers) { return hotkey; }
+            }
+            return null;
+        }
+
+        public void OnPlayerSpawning() {
+            UndefineAll();
+            hotkeys.Clear();
+            anyConflict = false;
+        }
+        public void ShowCurrent() {
+            if (hotkeys.Count == 0) {
+                p.Message("&e{0} doesn't use any hotkeys.", p.level.name);
+                return;
+            }
+            List<string> used = new List<string>();
+            foreach (Hotkey hotkey in hotkeys) {
+                if (!used.Contains(hotkey.keyName)) { used.Add(hotkey.Describe()); }
+            }
+            p.Message("{0} is using these hotkeys:", p.level.name);
+            p.MessageLines(used);
+            //p.Message("&b{0}&S", used.Join("&S, &b"));
+        }
+        public void DescribeConflicts() {
+            List<Tuple<int, BindPair, Hotkey>> conflicts = new List<Tuple<int, BindPair, Hotkey>>();
+
+            foreach (Hotkey hotkey in hotkeys) {
+                if (hotkey.IsRebound()) { continue; }
+
+                int bindOneDex;
+                BindPair bindPair = keybinds.BindPointingTo(hotkey.keyCode, out bindOneDex);
+                if (bindPair == null) { continue; }
+                anyConflict = true;
+                conflicts.Add(new Tuple<int, BindPair, Hotkey>(bindOneDex, (BindPair)bindPair, hotkey));
+            }
+            if (conflicts.Count == 0) {
+                if (anyConflict) { p.Message("&aAll keybind conflicts have been resolved."); anyConflict = false; }
+                return;
+            }
+
+            foreach (var tuple in conflicts) {
+                p.Message("&WKeybind [{0}] {1} &Wconflicts with {2}", tuple.Item1, tuple.Item2.Describe(), tuple.Item3.Describe());
+            }
+            p.Message("&WYou can change bindings or unbind to resolve {0}.", conflicts.Count == 1 ? "this conflict" : "these conflicts");
         }
     }
     public class Hotkey {
-        //public string action
-        public int keyCode;
-        public byte modifiers;
-        public Hotkey(int keyCode, byte modifiers) {
-            this.keyCode = keyCode; this.modifiers = modifiers;
+        public readonly string keyName;
+        public readonly string action;
+        public readonly int keyCode;
+        public readonly byte modifiers;
+        private Keybinds keybinds;
+
+        public bool Equals(Hotkey other) {
+            return other.keyCode == this.keyCode && other.modifiers == this.modifiers;
+        }
+        public string Describe() {
+            return string.Format("&b{0} &S( {1} )", keyName, action);
+        }
+
+        public bool IsRebound() {
+            return keyCode != keybinds.Filter(keyCode);
+        }
+
+        readonly string fullAction;
+        public Hotkey(string action, string fullAction, int keyCode, byte modifiers, Keybinds keybinds) {
+            this.action = action;
+            this.fullAction = fullAction; this.keyCode = keyCode; this.modifiers = modifiers;
+            this.keyName = Hotkeys.GetKeyName(keyCode);
+            this.keybinds = keybinds;
+        }
+        public void Define(Player p) {
+            int filtered = keybinds.Filter(keyCode);
+            p.Send(Packet.TextHotKey("NAS hotkey", fullAction, filtered, modifiers, true));
+        }
+        public void Undefine(Player p) {
+            int filtered = keybinds.Filter(keyCode);
+            p.Send(Packet.TextHotKey("", "", filtered, modifiers, true));
+        }
+    }
+
+    public class KeyBind {
+        public readonly string keyName;
+        public readonly int keyCode;
+        public KeyBind(int code) {
+            this.keyCode = code;
+            this.keyName = Hotkeys.GetKeyName(code);
+        }
+        public bool Equals(KeyBind other) {
+            return other.keyCode == this.keyCode;
+        }
+    }
+    public class BindPair {
+        public KeyBind Key;
+        public KeyBind Value;
+        public BindPair(KeyBind key, KeyBind value) {
+            this.Key = key; this.Value = value;
+        }
+        public string Describe() {
+            return string.Format("{0} to {1}", Key.keyName, Value.keyName);
+        }
+    }
+
+    public class Keybinds {
+        const string SAVEPATH = "plugins/nas/";
+        const string PATH = SAVEPATH + "playerkeybinds.txt";
+        static PlayerExtList saved;
+        public static void PluginLoad() {
+            if (!Directory.Exists(SAVEPATH)) { Directory.CreateDirectory(SAVEPATH); }
+
+            saved = PlayerExtList.Load(PATH);
+        }
+
+        public int Filter(int original) {
+            foreach (BindPair pair in binds) {
+                if (pair.Key.keyCode == original) { return pair.Value.keyCode; }
+            }
+            return original;
+        }
+        public BindPair BindPointingTo(int keyCode, out int bindOnedex) {
+            for (int i = 0; i < binds.Count; i++) {
+                BindPair pair = binds[i];
+                if (pair.Value.keyCode == keyCode) { bindOnedex = i + 1; return pair; }
+            }
+            bindOnedex = -1;
+            return null;
+        }
+        public void SaveBinds() {
+            StringBuilder b = new StringBuilder();
+            //3,4|5,6|
+            for (int i = 0; i < binds.Count; i++) {
+                BindPair pair = binds[i];
+                b.Append(pair.Key.keyCode.ToString());
+                b.Append(',');
+                b.Append(pair.Value.keyCode.ToString());
+                if (i < binds.Count - 1) {
+                    b.Append('|');
+                }
+            }
+            string data = b.ToString();
+            saved.Update(p.name, data);
+            saved.Save();
+        }
+
+        Player p;
+        Hotkeys hotkeys;
+        //Not thread safe. LOL!
+        List<BindPair> binds = new List<BindPair>();
+        public int bindsCount => binds.Count;
+        public Keybinds(Player p, Hotkeys hotkeys) {
+            this.p = p;
+            this.hotkeys = hotkeys;
+            string data = saved.Get(p.name);
+            if (string.IsNullOrEmpty(data)) { return; }
+
+            //Load the pairs
+            string[] pairs = data.Split(ScriptRunner.pipeChar);
+            foreach (string pair in pairs) {
+                string[] bits = pair.Split(new char[] { ',' });
+                if (bits.Length != 2) { continue; }
+                int key;
+                int value;
+
+                if (!int.TryParse(bits[0], out key)) { continue; }
+                if (!int.TryParse(bits[1], out value)) { continue; }
+
+                binds.Add(new BindPair(new KeyBind(key), new KeyBind(value)));
+            }
+        }
+        public void UpdatePlayerReference(Player p) { this.p = p; }
+
+        public void SetBind(int original, int custom) {
+            if (original == custom) { p.Message("The new key bind can't be the same as the original key."); return; }
+
+            if (Hotkeys.IsNumberKey(original) || Hotkeys.IsNumberKey(custom)) {
+                p.Message("&WNumber keys are reserved for the game's hotbar, so they cannot be used for hotkeys or rebinded hotkeys.");
+                p.Message("If your keyboard has a numpad, you can try NUMPAD[number] instead.");
+                return;
+            }
+
+            KeyBind ogBind = new KeyBind(original);
+            KeyBind customBind = new KeyBind(custom);
+
+            int iExisting = GetIndexWithKey(ogBind);
+            if (iExisting != -1) {
+                BindPair conflict = binds[iExisting];
+
+                //trying to set e.g. from E->U to E->K
+                if (conflict.Key.keyCode == original) {
+                    RemoveBind(iExisting, true);
+                    SetBind(original, custom);
+                    return;
+                }
+
+                p.Message("You already have &b{0} &Sset to &b{1}&S.", conflict.Key.keyName, conflict.Value.keyName);
+                p.Message("Remove binds with &T/keybind remove [key]");
+                return;
+            }
+
+            hotkeys.UndefineAll(); //Undefine, targeting any previously set keybinds
+
+            string described = Describe(ogBind);
+            p.Message("Updated keybinds: {0} &Sis now bound to &b{1}", described, customBind.keyName);
+            binds.Add(new BindPair(ogBind, customBind));
+            hotkeys.DescribeConflicts();
+
+            hotkeys.DefineAll(); //Redefine with new keybinds
+        }
+        int GetIndexWithKey(params KeyBind[] others) {
+            for (int i = 0; i < binds.Count; i++) {
+                BindPair pair = binds[i];
+                foreach (KeyBind other in others) {
+                    if (pair.Key.Equals(other)) { return i; }
+                }
+            }
+            return -1;
+        }
+
+        public void RemoveBind(int index, bool rebinding = false) {
+            if (index >= binds.Count || index < 0) {
+                p.Message("You don't have any personal keybind at slot {0}", index);
+                return;
+            }
+
+            hotkeys.UndefineAll(); //Undefine, targeting any previously set keybinds
+
+            BindPair removed = binds[index];
+            string described = Describe(removed.Key);
+            p.Message("Updated keybinds: {0} &Sis no longer bound to &b{1}", described, removed.Value.keyName);
+            binds.RemoveAt(index);
+            if (!rebinding) { hotkeys.DescribeConflicts(); }
+
+            hotkeys.DefineAll(); //Redefine with new keybinds
+        }
+
+        public string Describe(KeyBind originalBind) {
+            Hotkey hotkey = hotkeys.GetHotKey(originalBind.keyCode);
+            string described;
+            if (hotkey == null) {
+                described = String.Format("&b{0}", originalBind.keyName);
+            } else {
+                described = hotkey.Describe();
+            }
+            return described;
+        }
+        public void ListBinds() {
+            hotkeys.ShowCurrent();
+            if (binds.Count == 0) {
+                p.Message("You haven't set any personal keybinds.");
+                return;
+            }
+            p.Message("&eYour personal global keybinds:");
+            for (int i = 0; i < binds.Count; i++) {
+                BindPair pair = binds[i];
+
+                string described = Describe(pair.Key);
+                p.Message("[&a{0}&S] {1} &Sis bound to &b{2}", (i + 1), described, pair.Value.keyName);
+
+            }
+            hotkeys.DescribeConflicts();
+        }
+    }
+    public class KeybindCommand : Command2 {
+        public override string name { get { return "Keybind"; } }
+        public override string shortcut { get { return ""; } }
+        public override bool MessageBlockRestricted { get { return true; } }
+        public override string type { get { return "other"; } }
+        public override bool museumUsable { get { return true; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+        public override CommandAlias[] Aliases {
+            get {
+                return new[] {
+                    new CommandAlias("Keybinds", "list")
+                };
+            }
+        }
+
+        static string[] listHelp = new string[] {
+                "&T/Keybind list",
+                "&H Lists the current level hotkeys and your personal keybinds.",
+            };
+        static string[] bindHelp = new string[] {
+                "&T/Keybind bind [key] [new key]",
+                "&H Binds the action associated with [key]",
+                "&H To use [new key] instead.",
+            };
+        static string[] unbindHelp = new string[] {
+                "&T/Keybind unbind [number]",
+                "&H Removes a keybind by number.",
+                "&H Use &T/keybind list &Hto see your keybind list numbers."
+            };
+
+        static List<SubCommand> subs = new List<SubCommand>() {
+                new SubCommand("list",     UseList, listHelp  , false, null),
+                new SubCommand("bind",     UseBind, bindHelp  , false, new string[] { "add" } ),
+                new SubCommand("unbind", UseUnbind, unbindHelp, false, new string[] { "remove" }),
+            };
+        static SubCommandGroup group = new SubCommandGroup("keybind", subs);
+        public override void Use(Player p, string message, CommandData data) {
+            if (message.Length == 0) { Help(p); return; }
+            group.Use(p, message);
+        }
+        static void UseBind(Player p, string message) {
+            string[] args = message.SplitSpaces();
+            if (args.Length != 2) { p.Message("You must specify the original key and the new key bind."); return; }
+
+            ScriptData data = Core.GetScriptData(p);
+            int keyCode, other;
+            if (!data.hotkeys.FindKeyCode(args[0], out keyCode)) { return; }
+            if (!data.hotkeys.FindKeyCode(args[1], out other)) { return; }
+            data.hotkeys.keybinds.SetBind(keyCode, other);
+        }
+        static void UseUnbind(Player p, string message) {
+            if (message.Length == 0) {
+                p.Message("You must specify a keybind list number to unbind");
+                p.Message(unbindHelp[2]);
+                return;
+            }
+
+            ScriptData data = Core.GetScriptData(p);
+            if (data.hotkeys.keybinds.bindsCount == 0) {
+                p.Message("You have no keybinds to unbind.");
+                return;
+            }
+            int oneDex = 1;
+            if (!CommandParser.GetInt(p, message, "keybind list number", ref oneDex, 1, data.hotkeys.keybinds.bindsCount)) {
+                p.Message("Use &T/keybind list &Sto see your keybind list numbers.");
+                return;
+            }
+            data.hotkeys.keybinds.RemoveBind(oneDex - 1);
+        }
+        static void UseList(Player p, string message) {
+            ScriptData data = Core.GetScriptData(p);
+            data.hotkeys.keybinds.ListBinds();
+        }
+        public override void Help(Player p) {
+            p.Message("%T/Keybind");
+            p.Message("%HSome adventure maps use hotkeys.");
+            p.Message("%HThis command allows you to personalize them.");
+            p.MessageLines(listHelp);
+            p.MessageLines(bindHelp);
+            p.MessageLines(unbindHelp);
         }
     }
 
