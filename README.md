@@ -14,7 +14,13 @@ Not Awesome Script has a few extra steps compared to loading other plugins.
 
 ## It failed to compile/there were errors!
 
-This plugin is usually more up-to-date than the latest MCGalaxy release. If you get an error, you probably need to build the MCGalaxy source code yourself or download latest build from [here](https://mcgala.xyz/nightlies).
+This plugin is usually more up-to-date than the latest MCGalaxy release. If you get an error, you probably need to download latest build from [here](https://mcgala.xyz/nightlies) and update your server using it.
+
+To update your server from latest.zip:
+1. Shut down your server if it is running
+2. Extract the contents of the latest.zip file.
+3. Copy MCGalaxy.exe and MCGalaxy.dll from the extracted folder
+4. Paste MCGalaxy.exe and MCGalaxy.dll into your server folder, replacing the old files.
 
 ## General usage
 
