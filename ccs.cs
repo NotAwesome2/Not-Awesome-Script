@@ -6,15 +6,11 @@
 //reference System.dll
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
-using System.Net;
-using System.Security.Policy;
 using MCGalaxy;
 using MCGalaxy.Maths;
 using MCGalaxy.Events.PlayerEvents;
@@ -22,14 +18,76 @@ using MCGalaxy.Events.LevelEvents;
 using MCGalaxy.Events.PlayerDBEvents;
 using MCGalaxy.Commands;
 using MCGalaxy.Network;
-using MCGalaxy.Modules.Awards;
 using BlockID = System.UInt16;
 using ExtraLevelProps;
 using NA2;
+using System.Globalization;
 
+//COLLAPSE EVERYTHING IN VS WITH CTRL M A
 namespace PluginCCS {
 
-    public class CmdTempBlock : Command2 {
+    public class CmdDefineHotkey : Command2 {
+        public override string name { get { return "DefineHotkey"; } }
+        public override string shortcut { get { return ""; } }
+        public override bool MessageBlockRestricted { get { return true; } }
+        public override string type { get { return "other"; } }
+        public override bool museumUsable { get { return false; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+        public override bool LogUsage { get { return true; } }
+        public override CommandPerm[] ExtraPerms {
+            get { return new[] { new CommandPerm(LevelPermission.Operator, "can run DefineHotkey without message blocks") }; }
+        }
+
+        public override void Use(Player p, string message, CommandData data) {
+            if (!(data.Context == CommandContext.MessageBlock || CheckExtraPerm(p, data, 1))) { return; }
+            string[] args = message.SplitSpaces(3);
+            if (args.Length != 3) { p.Message("&WNot enough args to define hotkey."); Help(p); return; }
+
+            int keycode = Hotkeys.GetKeyCode(p, args[1]);
+            if (keycode == 0) { return; }
+
+            string fullAction = args[2] + "◙";
+            if (fullAction.Length > NetUtils.StringSize) {
+                p.Message("Hotkey text is too long ({0}), must be {1} at most.", fullAction.Length, NetUtils.StringSize);
+                return;
+            }
+            Hotkeys.DefineFor(p, args[0], fullAction, keycode, 0);
+        }
+
+        public override void Help(Player p) {
+            p.Message("%T/DefineHotkey [user-facing name] [key] [hotkey text]");
+            p.Message("%HDefines a hotkey for this level.");
+            p.Message("%H[user-facing name] must not have spaces.");
+            p.Message("%H[hotkey text] is sent to the server unchanged.");
+            p.Message("%HMake sure to use a / if it is a command.");
+        }
+    }
+    
+    /// <summary>
+    /// Base class for commands that need to throw script errors when there are invalid user args.
+    /// </summary>
+    public abstract class CmdThrowableForScript : Command2 {
+        public override void Use(Player p, string message, CommandData data) {
+            //Don't throw errors if ran manually
+            if (data.Context != CommandContext.MessageBlock) {
+                try {
+                    UseThrowable(p, message, data);
+                } catch (ArgumentException e) {
+                    p.Message("&W{0}", e.Message);
+                }
+                return;
+            }
+
+            //Throw errors if ran from MB (script) so it can be caught as script errors
+            UseThrowable(p, message, data);
+        }
+        /// <summary>
+        /// Override this method to implement command functionality. Throw ArgumentExceptions if user input is incorrect.
+        /// </summary>
+        protected abstract void UseThrowable(Player p, string message, CommandData data);
+    }
+
+    public class CmdTempBlock : CmdThrowableForScript {
         public override string name { get { return "TempBlock"; } }
         public override string shortcut { get { return ""; } }
         public override string type { get { return CommandTypes.Building; } }
@@ -37,8 +95,7 @@ namespace PluginCCS {
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
         public override bool LogUsage { get { return false; } }
 
-        public override void Use(Player p, string message, CommandData data) {
-
+        protected override void UseThrowable(Player p, string message, CommandData data) {
             if (!(p.group.Permission >= LevelPermission.Operator)) {
                 if (!Hacks.CanUseHacks(p)) {
                     if (data.Context != CommandContext.MessageBlock) {
@@ -51,30 +108,43 @@ namespace PluginCCS {
             BlockID block = p.GetHeldBlock();
             int x = p.Pos.BlockX, y = (p.Pos.Y - 32) / 32, z = p.Pos.BlockZ;
 
-            try {
-                string[] parts = message.Split(' ');
-                switch (parts.Length) {
-                    case 1:
-                        if (message == "") break;
+            string blockWord = null;
+            int coordOffset = -1;
 
-                        if (!CommandParser.GetBlock(p, parts[0], out block)) return;
-                        break;
-                    case 3:
-                        x = int.Parse(parts[0]);
-                        y = int.Parse(parts[1]);
-                        z = int.Parse(parts[2]);
-                        break;
-                    case 4:
-                        if (!CommandParser.GetBlock(p, parts[0], out block)) return;
+            string[] words = message.SplitSpaces();
 
-                        x = int.Parse(parts[1]);
-                        y = int.Parse(parts[2]);
-                        z = int.Parse(parts[3]);
-                        break;
-                    default: p.Message("Invalid number of parameters"); return;
+            bool Public = false;
+
+            if (message.Length > 0) {
+                blockWord = words[0];
+                if (words.Length == 2) {
+                    throw new ArgumentException(String.Format("Arg \"{0}\" has too few parts for coords, too many for only block.", message));
+                } else if (words.Length == 3) {
+                    coordOffset = 0; blockWord = null;
+                } else if (words.Length == 4) {
+                    coordOffset = 1;
+                } else if (words.Length > 4) {
+                    coordOffset = 1;
+
+                    if (!CommandParser.GetBool(p, words[4], ref Public)) {
+                        throw new ArgumentException(String.Format("Could not parse arg \"{0}\" as true or false for public tempblock", words[4]));
+                    }
                 }
-            } catch {
-                p.Message("Invalid parameters"); return;
+            }
+
+            if (coordOffset >= 0) {
+                try {
+                    x = int.Parse(words[0 + coordOffset]);
+                    y = int.Parse(words[1 + coordOffset]);
+                    z = int.Parse(words[2 + coordOffset]);
+                } catch {
+                    throw new ArgumentException("Could not parse coordinates from \"" + message + "\".");
+                }
+            }
+            if (blockWord != null) {
+                if (!CommandParser.GetBlock(p, blockWord, out block)) {
+                    throw new ArgumentException("There is no block \"" + blockWord + "\".");
+                }
             }
 
             if (!CommandParser.IsBlockAllowed(p, "place ", block)) return;
@@ -83,9 +153,12 @@ namespace PluginCCS {
             y = Clamp(y, p.level.Height);
             z = Clamp(z, p.level.Length);
 
-            p.SendBlockchange((ushort)x, (ushort)y, (ushort)z, block);
-            //string blockName = Block.GetName(p, block);
-            //Player.Message(p, "{3} block was placed at ({0}, {1}, {2}).", P.X, P.Y, P.Z, blockName);
+            Player[] players = Public ? PlayerInfo.Online.Items : new[] { p };
+
+            foreach (Player pl in players) {
+                if (pl.level != p.level) { continue; }
+                pl.SendBlockchange((ushort)x, (ushort)y, (ushort)z, block);
+            }
         }
 
         static int Clamp(int value, int axisLen) {
@@ -95,12 +168,13 @@ namespace PluginCCS {
         }
 
         public override void Help(Player p) {
-            p.Message("%T/TempBlock [block] <x> <y> <z>");
+            p.Message("%T/TempBlock [block] <x> <y> <z> <public>");
             p.Message("%HPlaces a client-side block at your feet or <x> <y> <z>");
+            p.Message("%HIf <public> is true, the tempblock is shown to all players in the level.");
         }
 
     }
-    public class CmdTempChunk : Command2 {
+    public class CmdTempChunk : CmdThrowableForScript {
         public override string name { get { return "tempchunk"; } }
         public override string shortcut { get { return "tempc"; } }
         public override string type { get { return CommandTypes.Building; } }
@@ -108,7 +182,7 @@ namespace PluginCCS {
         public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
         public override bool LogUsage { get { return false; } }
 
-        public override void Use(Player p, string message, CommandData data) {
+        protected override void UseThrowable(Player p, string message, CommandData data) {
 
             if (p.group.Permission < LevelPermission.Operator && !Hacks.CanUseHacks(p)) {
                 if (data.Context != CommandContext.MessageBlock) {
@@ -121,8 +195,7 @@ namespace PluginCCS {
             if (message == "") { Help(p); return; }
             string[] words = message.Split(' ');
             if (words.Length < 9) {
-                p.Message("%cYou need to provide all 3 sets of coordinates, which means 9 numbers total.");
-                return;
+                throw new ArgumentException("%cYou need to provide all 3 sets of coordinates, which means 9 numbers total.");
             }
 
             int x1 = 0, y1 = 0, z1 = 0, x2 = 0, y2 = 0, z2 = 0, x3 = 0, y3 = 0, z3 = 0;
@@ -139,12 +212,22 @@ namespace PluginCCS {
             if (!CommandParser.GetInt(p, words[6], "x3", ref x3, 0, p.Level.Width - 1)) { mistake = true; }
             if (!CommandParser.GetInt(p, words[7], "y3", ref y3, 0, p.Level.Height - 1)) { mistake = true; }
             if (!CommandParser.GetInt(p, words[8], "z3", ref z3, 0, p.Level.Length - 1)) { mistake = true; }
-            if (mistake) { return; }
 
-            if (x1 > x2) { p.Message("%cx1 cannot be greater than x2!"); mistake = true; }
-            if (y1 > y2) { p.Message("%cy1 cannot be greater than y2!"); mistake = true; }
-            if (z1 > z2) { p.Message("%cz1 cannot be greater than z2!"); mistake = true; }
-            if (mistake) { p.Message("%HMake sure the first set of coords is on the minimum corner (press f7)"); return; }
+            if (mistake) {
+                throw new ArgumentException("Could not parse one or more tempchunk coordinate numbers.");
+            }
+
+            string errorMsg = "";
+            if (x1 > x2) { errorMsg += "%cx1 cannot be greater than x2! "; mistake = true; }
+            if (y1 > y2) { errorMsg += "%cy1 cannot be greater than y2! "; mistake = true; }
+            if (z1 > z2) { errorMsg += "%cz1 cannot be greater than z2! "; mistake = true; }
+
+            if (mistake) {
+                errorMsg += " %HMake sure the first set of coords is on the minimum corner (press f7)";
+                throw new ArgumentException(errorMsg);
+            }
+
+
             bool allPlayers = false;
             if (words.Length > 9) {
                 CommandParser.GetBool(p, words[9], ref allPlayers);
@@ -429,7 +512,7 @@ namespace PluginCCS {
             p.Message("&HYou'll be prompted to use it during adventure maps.");
         }
 
-        public static void OnPlayerChat(Player p, string message) {
+        public static bool HandlePlayerChat(Player p, string message) {
             ScriptData scriptData = Core.GetScriptData(p);
             bool replyActive = false;
             bool notifyPlayer = false;
@@ -439,19 +522,20 @@ namespace PluginCCS {
                     replyActive = true;
                 }
             }
-            if (!replyActive) { return; }
+            if (!replyActive) { return false; }
 
             string msgStripped = message.Replace("[", "");
             msgStripped = msgStripped.Replace("]", "");
             int reply = -1;
-            if (Int32.TryParse(msgStripped, out reply)) {
+            if (NumberParser.TryParseInt(msgStripped, out reply)) {
                 CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
                 p.HandleCommand("replytwo", msgStripped, data2);
                 p.cancelchat = true;
-                return;
+                return true;
             }
             //notify player how to reply if they don't choose one and one is available
             if (notifyPlayer) { SetUpDone(p); }
+            return true;
         }
     }
 
@@ -507,7 +591,18 @@ namespace PluginCCS {
         public static string NA2WebFileDirectory = "/home/na2/Website-Files/";
         public static string NA2WebURL = "https://notawesome.cc/";
 
+
+        public static void MsgDev(string message, params object[] args) {
+            Player debugger = PlayerInfo.FindExact(DEBUG_MESSAGE_TARGET); if (debugger == null) { return; }
+            debugger.Message(message, args);
+        }
+        public static void MsgIfDev(Player p, string message, params object[] args) {
+            if (p.name != DEBUG_MESSAGE_TARGET) return;
+            p.Message(message, args);
+        }
+
         public override string creator { get { return "Goodly"; } }
+        const string DEBUG_MESSAGE_TARGET = "goodlyay+";
         public override string name { get { return "ccs"; } }
         public override string MCGalaxy_Version { get { return "1.9.3.9"; } }
 
@@ -539,7 +634,7 @@ namespace PluginCCS {
         public static Command updateOsScriptCmd;
         public static Command downloadScriptCmd;
 
-        static Command[] cmds = new Command[] { new KeybindCommand(), };
+        static Command[] cmds = new Command[] { new KeybindCommand(), new CmdDefineHotkey(), };
 
         static Command _boostCmd = null;
         public static Command boostCmd {
@@ -551,8 +646,20 @@ namespace PluginCCS {
             get { if (_effectCmd == null) { _effectCmd = Command.Find("effect"); } return _effectCmd; }
         }
 
+        public const string inputProp = "input";
+        static string[] inputPropDesc = new string[] {
+            "[scriptname] &H- which script /input runs (non OS)",
+        };
+
+        public const string savePlayerScriptDataProp = "save_player_script_data";
+        static string[] savePlayerScriptDataPropDesc = new string[] {
+            "[true/false]",
+            "Allows OS scripts read and write permanently saved data."
+        };
 
         public override void Load(bool startup) {
+            ExtraLevelProps.ExtraLevelProps.Register(name, inputProp, LevelPermission.Operator, inputPropDesc, null);
+            ExtraLevelProps.ExtraLevelProps.Register(name, savePlayerScriptDataProp, LevelPermission.Operator, savePlayerScriptDataPropDesc, ExtraLevelProps.ExtraLevelProps.OnPropChangingBool);
 
             Script.PluginLoad();
             ScriptActions.PluginLoad();
@@ -594,21 +701,20 @@ namespace PluginCCS {
             OnLevelUnloadEvent.Register(OnLevelUnload, Priority.Low);
             OnPlayerChatEvent.Register(OnPlayerChat, Priority.High);
             OnPlayerCommandEvent.Register(OnPlayerCommand, Priority.High);
-
             OnPlayerDisconnectEvent.Register(OnPlayerDisconnect, Priority.Low);
-
             OnPlayerMoveEvent.Register(OnPlayerMove, Priority.Low);
-
             OnPlayerClickEvent.Register(OnPlayerClick, Priority.Low);
 
             foreach (Player pl in PlayerInfo.Online.Items) {
                 OnPlayerFinishConnecting(pl);
             }
 
-
             Chat.MessageGlobal("Script plugin reloaded. If you're in an adventure map, you may need to rejoin it.");
         }
         public override void Unload(bool shutdown) {
+            ExtraLevelProps.ExtraLevelProps.Unregister(inputProp);
+            ExtraLevelProps.ExtraLevelProps.Unregister(savePlayerScriptDataProp);
+
             Command.Unregister(tempBlockCmd);
             Command.Unregister(tempChunkCmd);
             Command.Unregister(stuffCmd);
@@ -630,11 +736,8 @@ namespace PluginCCS {
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
             OnPlayerChatEvent.Unregister(OnPlayerChat);
             OnPlayerCommandEvent.Unregister(OnPlayerCommand);
-
             OnPlayerDisconnectEvent.Unregister(OnPlayerDisconnect);
-
             OnPlayerMoveEvent.Unregister(OnPlayerMove);
-
             OnPlayerClickEvent.Unregister(OnPlayerClick);
 
             SaveAllPlayerData();
@@ -681,6 +784,7 @@ namespace PluginCCS {
         static void OnPlayerSpawning(Player p, ref Position pos, ref byte yaw, ref byte pitch, bool respawning) {
             if (respawning) { return; } //Only call when spawning in a new level
 
+
             //clear all persistent chat lines at the priority used by cpemessage in script
             for (int i = 1; i < CmdReplyTwo.maxReplyCount + 1; i++) {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
@@ -716,8 +820,50 @@ namespace PluginCCS {
             Script.OnLevelUnload(lvl, ref cancel);
         }
         static void OnPlayerChat(Player p, string message) {
-            CmdReplyTwo.OnPlayerChat(p, message);
+            //If reply is used,don't run the rest of this junk
+            if (CmdReplyTwo.HandlePlayerChat(p, message)) { return; }
+
+
+            ScriptData scriptData = GetScriptData(p);
+            if (!scriptData.chatEvents.active) { return; }
+
+            Sevent sevent = scriptData.chatEvents.sync;
+
+            if (sevent == null) { return; }
+
+            ScriptActions.ChatEvent.ChatEventArgs args = (ScriptActions.ChatEvent.ChatEventArgs)sevent.arg;
+            string chatEventLabel = args.onChatLabel;
+            string[] phrases = args.phrases;
+
+            double[] similarities = new double[phrases.Length];
+            for (int i = 0; i < phrases.Length; i++) {
+                similarities[i] = StringUtils.CalculateSimilarity(message.StripPunctuation(), phrases[i].StripPunctuation());
+            }
+
+            StringBuilder sb = new StringBuilder();
+
+            sb.Append(message.Replace(' ', '_')); //runArg1, message
+            foreach (double sim in similarities) {
+                sb.Append(ScriptRunner.pipeChar);
+                sb.Append(sim); //runArg2, 3, etc, similarity to 1st, 2nd, etc target phrase
+            }
+            string runArgs = sb.ToString();
+
+            string cancelLogicLabelAndArgs = sevent.scriptLabel + '|' + runArgs;
+            string onChatLabelAndArgs = chatEventLabel + '|' + runArgs;
+
+            scriptData.SetString("cancelchat", "", sevent.perms, sevent.scriptName);
+
+            CommandData data = sevent.GetCommandData(p.Pos.FeetBlockCoords);
+            ScriptRunner.PerformScript(p, sevent.scriptName, cancelLogicLabelAndArgs, sevent.perms, false, data);
+
+            if (scriptData.GetString("cancelchat", sevent.perms, sevent.scriptName).ToLower() == "true") {
+                p.cancelchat = true;
+            }
+
+            ScriptRunner.PerformScriptOnNewThread(p, sevent.scriptName, onChatLabelAndArgs, sevent.perms, false, data);
         }
+
         static void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
             Script.OnPlayerCommand(p, cmd, message, data);
         }
@@ -740,24 +886,82 @@ namespace PluginCCS {
 
             ScriptData data = GetScriptData(p);
 
-            if (data.clickEventAsync == null && data.clickEvent == null) { return; }
+            if (!data.clickEvents.active) { return; }
 
             Vec3S32 coords = new Vec3S32(x, y, z);
             ClickInfo clickInfo = new ClickInfo(button, action, yaw, pitch, entity, x, y, z, face);
 
-            if (data.clickEvent != null) {
-                DoClick(p, data.clickEvent, coords, clickInfo);
-            }
-            if (data.clickEventAsync != null) {
-                DoClick(p, data.clickEventAsync, coords, clickInfo);
-            }
+            DoClick(p, data.clickEvents.sync, coords, clickInfo);
+            DoClick(p, data.clickEvents.async, coords, clickInfo);
         }
         static void DoClick(Player p, Sevent sevent, Vec3S32 coords, ClickInfo clickInfo) {
+            if (sevent == null) { return; }
             ScriptRunner.PerformScriptOnNewThread(p, sevent.scriptName, sevent.scriptLabel, sevent.perms, sevent.async,
                 sevent.GetCommandData(coords),
                 clickInfo);
         }
 
+    }
+    public static class StringUtils {
+
+        public static string StripPunctuation(this string message) {
+            StringBuilder sb = new StringBuilder(message.Length);
+            foreach (char c in message) {
+                if (AlphabetOrNumeral(c)) sb.Append(c);
+            }
+            return sb.ToString().Trim();
+        }
+        static bool AlphabetOrNumeral(char c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        }
+
+        /// <summary>
+        /// Calculates the similarity, from 0 to 1, between two caselessly compared strings.
+        /// </summary>
+        public static double CalculateSimilarity(string source, string target) {
+            source = source.ToLower(); target = target.ToLower();
+            if ((source == null) || (target == null)) return 0.0;
+            if ((source.Length == 0) || (target.Length == 0)) return 0.0;
+            if (source == target) return 1.0;
+
+            int stepsToSame = ComputeLevenshteinDistance(source, target);
+            return (1.0 - ((double)stepsToSame / (double)Math.Max(source.Length, target.Length)));
+        }
+
+        //https://social.technet.microsoft.com/wiki/contents/articles/26805.c-calculating-percentage-similarity-of-2-strings.aspx
+        static int ComputeLevenshteinDistance(string source, string target) {
+            if ((source == null) || (target == null)) return 0;
+            if ((source.Length == 0) || (target.Length == 0)) return 0;
+            if (source == target) return source.Length;
+
+            int sourceWordCount = source.Length;
+            int targetWordCount = target.Length;
+
+            // Step 1
+            if (sourceWordCount == 0)
+                return targetWordCount;
+
+            if (targetWordCount == 0)
+                return sourceWordCount;
+
+            int[,] distance = new int[sourceWordCount + 1, targetWordCount + 1];
+
+            // Step 2
+            for (int i = 0; i <= sourceWordCount; distance[i, 0] = i++) ;
+            for (int j = 0; j <= targetWordCount; distance[0, j] = j++) ;
+
+            for (int i = 1; i <= sourceWordCount; i++) {
+                for (int j = 1; j <= targetWordCount; j++) {
+                    // Step 3
+                    int cost = (target[j - 1] == source[i - 1]) ? 0 : 1;
+
+                    // Step 4
+                    distance[i, j] = Math.Min(Math.Min(distance[i - 1, j] + 1, distance[i, j - 1] + 1), distance[i - 1, j - 1] + cost);
+                }
+            }
+
+            return distance[sourceWordCount, targetWordCount];
+        }
     }
 
     public class CmdScript : Command2 {
@@ -1002,7 +1206,7 @@ namespace PluginCCS {
             script.includedPaths = new List<string>();
             script.includedPaths.Add(path); //Add self
 
-            string[] scriptLines = GetLines(p, scriptName, path);
+            string[] scriptLines = GetLines(p, scriptName, path, -1);
             if (scriptLines == null) { return null; }
 
             if (!script.AddFile(p, scriptName, scriptLines)) { return null; }
@@ -1010,10 +1214,10 @@ namespace PluginCCS {
             script.includedPaths = null;
             return script;
         }
-        static string[] GetLines(Player p, string scriptName, string path) {
+        static string[] GetLines(Player p, string scriptName, string path, int lineNumber) {
             lock (locker) {
                 if (!File.Exists(path)) {
-                    CompileError(p, scriptName, -1, "Script file for {0} does not exist.", path); return null;
+                    CompileError(p, scriptName, lineNumber, "Script file for {0} does not exist.", path); return null;
                 }
                 string[] scriptLines;
                 try {
@@ -1044,7 +1248,7 @@ namespace PluginCCS {
                     string[] bits = line.SplitSpaces();
                     if (bits.Length != 2) { CompileError(p, scriptName, lineNumber, "Include statement only accepts one argument which is the script to be included."); return false; }
 
-                    string includeScriptName = bits[1].ToLower();
+                    string includeScriptName = bits[1];
                     string includePath = FullPath(includeScriptName);
                     if (includedPaths.Contains(includePath)) {
                         //p.Message("{0} was already included, ignoring", includeScriptName);
@@ -1053,7 +1257,7 @@ namespace PluginCCS {
 
                     includedPaths.Add(includePath);
 
-                    string[] includeLines = GetLines(p, includeScriptName, includePath);
+                    string[] includeLines = GetLines(p, scriptName, includePath, lineNumber);
                     if (includeLines == null) { return false; }
                     if (!CanInclude(p, scriptName, includeScriptName, lineNumber, includeLines)) { return false; }
 
@@ -1197,7 +1401,7 @@ namespace PluginCCS {
                 isOS = true;
             } else {
                 scriptCmdName = Core.runscriptCmd.name;
-                scriptName = p.level.GetExtraPropString("input", p.level.name);
+                scriptName = p.level.GetExtraPropString(Core.inputProp, p.level.name);
                 isOS = false;
             }
 
@@ -1313,7 +1517,7 @@ namespace PluginCCS {
             runner.startingLevelName = p.level.name;
             runner.scriptName = scriptName;
             runner.perms = perms;
-            runner.data = data;
+            runner.cmdData = data;
             runner.repeatable = repeatable;
             runner.thisBool = thisBool;
             runner.runArgs = runArgs;
@@ -1323,8 +1527,13 @@ namespace PluginCCS {
     }
 
 
-    //Fields
+
     public class RunnerPerms {
+
+        const int actionsNormal = 61360;
+        const int actionsMax = actionsNormal * 4;
+        const int recursiveThreadLimitNormal = 10;
+        const int recursiveThreadLimitMax = recursiveThreadLimitNormal * 2;
 
         public static RunnerPerms Staff = new RunnerPerms(true, true, true, true);
 
@@ -1333,28 +1542,33 @@ namespace PluginCCS {
         public readonly bool canRunMessageBlockRestricted;
         public readonly bool canGiveAwards;
         public readonly int actionLimit;
+        public readonly int recursiveThreadLimit;
         public readonly int newThreadLimit;
 
-        const int actionsNormal = 61360;
-        const int actionsMax = actionsNormal * 4;
-        const int newThreadLimitNormal = 10;
-        const int newThreadLimitMax = newThreadLimitNormal * 2;
+        const int newThreadLimitNormal = 16;
+        const int newThreadLimitMax = 64;
+
+
         public RunnerPerms(bool canSave, bool runAsNobody, bool canRunMessageBlockRestricted, bool canGiveAwards) {
             this.canSave = canSave;
             this.staffPermission = runAsNobody;
             this.canRunMessageBlockRestricted = canRunMessageBlockRestricted;
             this.canGiveAwards = canGiveAwards;
 
-            actionLimit = runAsNobody ? actionsMax : actionsNormal;
-            newThreadLimit = runAsNobody ? newThreadLimitMax : newThreadLimitNormal;
+            actionLimit = staffPermission ? actionsMax : actionsNormal;
+            recursiveThreadLimit = staffPermission ? recursiveThreadLimitMax : recursiveThreadLimitNormal;
+            newThreadLimit = staffPermission ? newThreadLimitMax : newThreadLimitNormal;
         }
         public RunnerPerms(Level lvl) {
-            canSave = lvl.GetExtraPropBool("save_player_script_data");
+            canSave = lvl.GetExtraPropBool(Core.savePlayerScriptDataProp);
 
             actionLimit = staffPermission ? actionsMax : actionsNormal;
+            recursiveThreadLimit = staffPermission ? recursiveThreadLimitMax : recursiveThreadLimitNormal;
             newThreadLimit = staffPermission ? newThreadLimitMax : newThreadLimitNormal;
         }
     }
+
+    //Fields
     public partial class ScriptRunner {
 
         public static char[] pipeChar = new char[] { '|' };
@@ -1395,7 +1609,7 @@ namespace PluginCCS {
         public bool allowMBrepeat;
         public string thisBool;
 
-        public CommandData data;
+        public CommandData cmdData;
         public ClickInfo clickInfo = null;
 
         public int actionIndex;
@@ -1521,7 +1735,7 @@ namespace PluginCCS {
             CommandData data = default(CommandData);
             data.Context = CommandContext.MessageBlock;
             data.Rank = perms.staffPermission ? LevelPermission.Nobody : LevelPermission.Guest;
-            data.MBCoords = this.data.MBCoords;
+            data.MBCoords = this.cmdData.MBCoords;
             return data;
         }
         public void DoCmd(Command cmd, string args) {
@@ -1540,16 +1754,16 @@ namespace PluginCCS {
             try {
                 cmd.Use(p, args, data);
             } catch (Exception ex) {
-                Logger.LogError(ex);
-                Error("An error occured and command {0} could not be executed.", cmd.name);
+                //Logger.LogError(ex);
+                Error("An error occured when running command {0} with args \"{1}\": &S{2}", cmd.name, args, ex.Message);
             }
         }
         public void DoCmdNoPermChecks(Command cmd, string args) {
             try {
                 cmd.Use(p, args, GetCommandData());
             } catch (Exception ex) {
-                Logger.LogError(ex);
-                Error("An error occured and command {0} could not be executed.", cmd.name);
+                //Logger.LogError(ex);
+                Error("An error occured when running command {0} with args \"{1}\": &S{2}", cmd.name, args, ex.Message);
             }
         }
         public void DoNewThreadRunScript(ScriptRunner scriptRunner, string startLabel) {
@@ -1607,6 +1821,7 @@ namespace PluginCCS {
         }
         public void TryReplaceRunArgs(string[] newRunArgs) {
             if (newRunArgs.Length < 2) { return; }
+
 
             ReplaceUnderScoreWithSpaceInRunArgs(ref newRunArgs);
 
@@ -1705,8 +1920,8 @@ namespace PluginCCS {
             actionCounter = 0;
             this.newThreadNestLevel = newThreadNestLevel;
 
-            if (newThreadNestLevel > perms.newThreadLimit) {
-                p.Message("&cScript error: You cannot call a newthread from another newthread more than {0} times in a row.", perms.newThreadLimit);
+            if (newThreadNestLevel > perms.recursiveThreadLimit) {
+                p.Message("&cScript error: You cannot call a newthread from another newthread more than {0} times in a row.", perms.recursiveThreadLimit);
                 return;
             }
             if (!script.GetLabel(startLabel, out actionIndex)) {
@@ -1772,8 +1987,7 @@ namespace PluginCCS {
 
                 actionCounter++;
                 if (actionCounter > perms.actionLimit) {
-                    p.Message("&cScript error: Over {0} actions have been performed! Assuming endless loop and aborting.", perms.actionLimit);
-                    p.Message("&cLast line number ran was: {0}", curLine.lineNumber);
+                    Error("Over {0} actions have been performed! Assuming endless loop and aborting.", perms.actionLimit);
                     break;
                 }
             }
@@ -1822,7 +2036,7 @@ namespace PluginCCS {
             string comparedToArg = ifBits[2];
 
             bool comparingLiteral = false;
-            if (IsQuoted(comparedToArg)) { comparingLiteral = true; goto handleString;  }
+            if (IsQuoted(comparedToArg)) { comparingLiteral = true; goto handleString; }
 
             //handle double
             double packagedoubleValue;
@@ -1838,8 +2052,7 @@ namespace PluginCCS {
         handleString:
             string packageLiteral = GetString(packageName);
             string comparedToLiteral;
-            if (comparingLiteral) { comparedToLiteral = EscapeQuotes(comparedToArg); }
-            else { comparedToLiteral = GetString(comparedToArg); }
+            if (comparingLiteral) { comparedToLiteral = EscapeQuotes(comparedToArg); } else { comparedToLiteral = GetString(comparedToArg); }
 
             if (equality == "=") {
                 doAction = packageLiteral.CaselessEq(comparedToLiteral);
@@ -1879,21 +2092,23 @@ namespace PluginCCS {
                 p.Message("  {0}", args);
             }
 
-            line.actionType.Behavior(this);
+            try {
+                line.actionType.Behavior(this);
+            } catch (Exception e) {
+                Error("C# runtime error: {0}", e.Message);
+            }
 
             if (scriptData.debugging && scriptData.debuggingDelay > 0) { Thread.Sleep(scriptData.debuggingDelay); }
         }
 
-
-
         public bool GetDoubleRawOrVal(string arg, out double value) {
-            if (double.TryParse(arg, out value)) { return true; } //If got raw value, done
+            if (NumberParser.TryParseDouble(arg, out value)) { return true; } //If got raw value, done
             if (GetDouble(arg, out value)) { return true; } //If got package value, done
 
             return false;
         }
         public bool GetIntRawOrVal(string arg, out int value) {
-            if (Int32.TryParse(arg, out value)) { return true; } //If got raw value, done
+            if (NumberParser.TryParseInt(arg, out value)) { return true; } //If got raw value, done
             if (GetInt(arg, out value)) { return true; } //If got package value, done
 
             return false;
@@ -1904,8 +2119,8 @@ namespace PluginCCS {
             string packageValue = GetString(package);
             if (packageValue.Length == 0) { return true; } //treat an empty or undefined value as 0
 
-            if (double.TryParse(packageValue, out value)) { return true; }
-            
+            if (NumberParser.TryParseDouble(packageValue, out value)) { return true; }
+
             return false;
         }
         public bool GetInt(string package, out int value) {
@@ -1913,7 +2128,7 @@ namespace PluginCCS {
             string packageValue = GetString(package);
             if (packageValue.Length == 0) { return true; } //treat an empty or undefined value as 0
 
-            if (Int32.TryParse(packageValue, out value)) { return true; }
+            if (NumberParser.TryParseInt(packageValue, out value)) { return true; }
 
             return false;
         }
@@ -1926,7 +2141,7 @@ namespace PluginCCS {
 
             if (stringName.Length > 6 && stringName.CaselessStarts("runArg")) {
                 int runArgIndex;
-                if (!Int32.TryParse(stringName.Substring(6), out runArgIndex)) { goto fuckyou; }
+                if (!NumberParser.TryParseInt(stringName.Substring(6), out runArgIndex)) { goto fuckyou; }
 
                 if (runArgIndex < runArgs.Length) { return runArgs[runArgIndex]; }
             }
@@ -2009,6 +2224,7 @@ namespace PluginCCS {
             if (message.IndexOf('@') == -1) { return message; }
             message = message.Replace("@p", p.name);
             message = message.Replace("@nick", NameUtils.MakeNatural(p.DisplayName));
+            message = message.Replace("@color", p.color);
             return message;
         }
 
@@ -2028,7 +2244,7 @@ namespace PluginCCS {
             ScriptActions.Terminate.Do(this);
         }
     }
-
+    // ----------------------------------------------------------------- Actions
     public static class ScriptActions {
 
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
@@ -2120,7 +2336,9 @@ namespace PluginCCS {
             public override string[] documentation => new string[] {
                 "[message]",
                 "    sends a message to the player.",
-                "    You can use @p to substitute their full player name (includes the +) or @nick to subtitute for a more natural version of their name (e.g. Mike_30+ becomes Mike)",
+                "    Use @p to substitute the player's name (includes the +)",
+                "    Use @nick to subtitute for a more natural version of player's name (e.g. Mike_30+ becomes Mike)",
+                "    Use @color to substitute for the player's currently set color code"
             };
 
             public override string name => "msg";
@@ -2179,8 +2397,7 @@ namespace PluginCCS {
             public override string name => "jump";
 
             public override void Behavior(ScriptRunner run) {
-                //run.cmdName is label|runArg|runArg
-                string[] newRunArgs = (run.cmdName).Split(ScriptRunner.pipeChar);
+                string[] newRunArgs = run.args.Split(ScriptRunner.pipeChar);
                 run.TryReplaceRunArgs(newRunArgs);
 
                 if (!run.script.GetLabel(newRunArgs[0], out run.actionIndex)) {
@@ -2277,8 +2494,12 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName.Length == 0) { run.Error("Please specify a label and or runArgs for the newthread to run with."); return; }
+                if (run.newthreads.Count > run.perms.newThreadLimit) {
+                    run.Error("You may only run {0} threads at the same time.", run.perms.newThreadLimit);
+                    return;
+                }
 
-                string[] newThreadRunArgs = (run.cmdName).Split(ScriptRunner.pipeChar);
+                string[] newThreadRunArgs = run.args.Split(ScriptRunner.pipeChar);
                 string newThreadLabel = newThreadRunArgs[0];
                 if (newThreadRunArgs.Length == 1) {
                     //no new runArgs were specified
@@ -2286,11 +2507,12 @@ namespace PluginCCS {
                 } else {
                     //they specified new runArgs
                     newThreadRunArgs[0] = run.runArgs[0]; //preserve starting label from original script instance
-                    ScriptRunner.ReplaceUnderScoreWithSpaceInRunArgs(ref newThreadRunArgs);
+                    //Don't do this anymore, allow spaces in runargs
+                    //ScriptRunner.ReplaceUnderScoreWithSpaceInRunArgs(ref newThreadRunArgs);
                 }
 
                 if (!run.script.HasLabel(newThreadLabel)) { run.Error("Unknown newthread label \"" + newThreadLabel + "\"."); return; }
-                ScriptRunner scriptRunner = ScriptRunner.Create(run.p, run.scriptName, run.perms, run.data, run.repeatable, run.thisBool, newThreadRunArgs);
+                ScriptRunner scriptRunner = ScriptRunner.Create(run.p, run.scriptName, run.perms, run.cmdData, run.repeatable, run.thisBool, newThreadRunArgs);
                 if (scriptRunner == null) { run.Error("Could not compile script or could not create script runner instance for newthread"); return; }
                 run.DoNewThreadRunScript(scriptRunner, newThreadLabel);
             }
@@ -3050,7 +3272,7 @@ namespace PluginCCS {
                 "    This feature allows the player to run the #input label by pressing a key.",
                 "    [input args] will be sent as an automatic command /input [input args]",
                 "    [key name] must match a key name from the LWJGL keycode specification.",
-                "    You can find the names here: https://www.dropbox.com/scl/fi/uyijnzp6thyfizd9pid3o/nasKeycodes.txt?rlkey=j58hwzqjnixcmhq7sqxpw4v4o&dl=1",
+                "    You can find the names here: https://notawesome.cc/docs/nas/keycodes.txt",
                 "    <list of space separated modifiers> is optional and can be any combination of \"ctrl\" \"shift\" \"alt\" and \"async\"",
                 "    async is a unique modifier that doesn't change what keys must be pressed, but allows the input to run repeatedly before the previous input is finished.",
                 "    async will call the label #inputAsync instead of the label #input.",
@@ -3074,7 +3296,7 @@ namespace PluginCCS {
                 if (bits.Length < 2) { run.Error("Not enough arguments to define a hotkey: \"" + run.args + "\"."); return; }
 
                 string action = bits[0];
-                int keyCode = run.scriptData.hotkeys.GetKeyCode(bits[1]);
+                int keyCode = Hotkeys.GetKeyCode(run.p, bits[1]);
                 if (keyCode == 0) { run.ErrorAbove(); return; }
                 string modifierArgs = bits.Length > 2 ? bits[2].ToLower() : "";
                 byte modifiers = Hotkeys.GetModifiers(modifierArgs);
@@ -3107,7 +3329,8 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.Split(ScriptRunner.pipeChar);
-                int keyCode = run.scriptData.hotkeys.GetKeyCode(bits[0]); if (keyCode == 0) { run.ErrorAbove(); return; }
+                int keyCode = Hotkeys.GetKeyCode(run.p, bits[0]);
+                if (keyCode == 0) { run.ErrorAbove(); return; }
 
                 byte modifiers = 0;
                 if (bits.Length > 1) {
@@ -3332,31 +3555,120 @@ namespace PluginCCS {
                 return new Vec3F32((float)x, (float)y, (float)z);
             }
         }
-        public class RegisterClick : ScriptAction {
-            public override string[] documentation => new string[] {
-                "[label] <async>",
-                "    Registers a label that will be called whenever the player clicks.",
-                "    If the second argument is \"async\", it will allow the label to run again before the previous label is finished.",
-                "    Only works when map buildable and deletable are OFF.",
-                "    For more info, see the Click Label section.",
-            };
 
-            public override string name => "registerclick";
+        public abstract class Event : ScriptAction {
+            public override string[] documentation => throw new MemberAccessException();
 
+            public override string name => throw new MemberAccessException();
+
+            protected abstract SevGroup GetSevGroup(ScriptRunner run);
+            public abstract bool asyncAllowed { get; }
+            public virtual bool osAllowed => true;
             public override void Behavior(ScriptRunner run) {
-                if (run.args.Length == 0) {
-                    run.Error("You must provide a label to run on the click event.");
+                if (!osAllowed && !run.perms.staffPermission) {
+                    run.Error("Action {0} is not allowed in os scripts", name);
                     return;
                 }
-                string[] args = run.args.SplitSpaces();
-                bool async = args.Length > 1 && args[1].CaselessEq("async");
+                string[] args = run.args.SplitSpaces(4);
+                if (args.Length < 2) {
+                    run.Error("Not enough args for Action {0}", name);
+                    return;
+                }
 
-                Sevent sevent = new Sevent(run.perms, run.scriptName, args[0], async);
-
-                if (async) {
-                    run.scriptData.clickEventAsync = sevent;
+                bool async;
+                if (args[0] == "sync") {
+                    async = false;
+                } else if (args[0] == "async") {
+                    async = true;
                 } else {
-                    run.scriptData.clickEvent = sevent;
+                    run.Error("The first argument for {0} must be either \"sync\" or \"async\".", name);
+                    return;
+                }
+                if (!asyncAllowed && async) { run.Error("async is not available for {0}", name); return; }
+
+                string func = args[1];
+
+                // clickevent
+                // sync[0] register[1] #click[2] customArg[3]
+
+                if (func == "register") {
+                    if (args.Length < 3) { run.Error("You must provide a label to register for {0}", name); return; }
+                    string label = args[2];
+
+                    string stringArg = args.Length >= 4 ? args[3] : "";
+                    object arg = null;
+                    if (!ParseArg(run, stringArg, ref arg)) { return; }
+
+                    Sevent sevent = new Sevent(run.perms, run.scriptName, label, async, arg);
+                    GetSevGroup(run).Register(sevent, async);
+                    return;
+                }
+                if (func == "unregister") {
+                    GetSevGroup(run).Unregister(async);
+                    return;
+                }
+                run.Error("The second argument for {0} must be either \"register\" or \"unregister\".", name);
+            }
+            protected virtual bool ParseArg(ScriptRunner run, string stringArg, ref object arg) {
+                return true;
+            }
+        }
+        public class ClickEvent : Event {
+            public override string[] documentation => new string[] {
+                "[async or sync] register [#label]",
+                "    Registers a label that will be called whenever the player clicks.",
+                "    async means the label can be ran again before the previous event is finished running.",
+                "    You can use a different label for both async or sync and they will both be called.",
+                "    Only works when map buildable and deletable are OFF.",
+                "    To get information about the player click, see the Click Label section.",
+                "clickevent [async or sync] unregister",
+                "    Unregisteres the previously registered [label] for async or sync.",
+            };
+
+            public override string name => "clickevent";
+            protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.clickEvents; }
+            public override bool asyncAllowed => true;
+        }
+        public class ChatEvent : Event {
+            public override string[] documentation => new string[] {
+                "sync register [#cancelLogic] [#onChat] [phrase]|<phrase2>|<etc>",
+                "    This Action is not allowed in os scripts.",
+                "    Registers two labels that will be called whenever the player chats.",
+                "    [#cancelLogic] is used to determine if the chat message should be cancelled by setting \"cancelchat\" package to true.",
+                "    [#cancelLogic] must contain no delays, otherwise the player will experience server lag.",
+                "    [#onChat] will be called directly after [#cancelLogic] and may contain delay without issues.",
+                "    [phrase] is the target phrase that the chat message will be compared to.",
+                "    At minimum, two runArgs are passed to [#cancelLogic].",
+                "    runArg1 is the chat message;",
+                "    runArg2 and onward is a number between 0 and 1 that shows how closely the chat message caselessly equals the [phrase].",
+                "    For example, passing phrases foo|bar will give runArg2 for how much the message matches foo and runArg3 for matches bar.",
+                "chatevent sync unregister",
+                "    Unregisters the previously registered chat event.",
+            };
+
+            public override string name => "chatevent";
+
+            protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.chatEvents; }
+            public override bool asyncAllowed => false;
+            public override bool osAllowed => false;
+            protected override bool ParseArg(ScriptRunner run, string stringArg, ref object arg) {
+                try {
+                    arg = new ChatEventArgs(stringArg);
+                    return true;
+                } catch (ArgumentException e) {
+                    run.Error(e.Message);
+                    return false;
+                }
+            }
+            public class ChatEventArgs {
+                public readonly string onChatLabel;
+                public readonly string[] phrases;
+                public ChatEventArgs(string message) {
+                    // #onChat thanks spiders|thank you spiders
+                    string[] args = message.SplitSpaces(2);
+                    if (args.Length != 2) { throw new ArgumentException("chatevent requires a label for cancel logic, a label for on chat, and one or more | separated target phrases"); }
+                    onChatLabel = args[0];
+                    phrases = args[1].Split(ScriptRunner.pipeChar);
                 }
             }
         }
@@ -3416,23 +3728,23 @@ namespace PluginCCS {
         public class MBCoords : ReadOnlyPackage {
             public override string desc => "The space-separated x y z coordinates of the message block that the script is ran from.";
             public override string Getter(ScriptRunner run) {
-                return run.data.MBCoords.X + " " + run.data.MBCoords.Y + " " + run.data.MBCoords.Z;
+                return run.cmdData.MBCoords.X + " " + run.cmdData.MBCoords.Y + " " + run.cmdData.MBCoords.Z;
             }
         }
         public class MBX : ReadOnlyPackage {
             public override string desc => "The x y and z coordinates of the message block that the script ran from.";
             public override string Getter(ScriptRunner run) {
-                return run.data.MBCoords.X.ToString();
+                return run.cmdData.MBCoords.X.ToString();
             }
         }
         public class MBY : MBX {
             public override string Getter(ScriptRunner run) {
-                return run.data.MBCoords.Y.ToString();
+                return run.cmdData.MBCoords.Y.ToString();
             }
         }
         public class MBZ : MBX {
             public override string Getter(ScriptRunner run) {
-                return run.data.MBCoords.Z.ToString();
+                return run.cmdData.MBCoords.Z.ToString();
             }
         }
 
@@ -3515,7 +3827,7 @@ namespace PluginCCS {
             public override string desc => "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had.";
             public override string Getter(ScriptRunner run) {
                 double msgDelayMultiplier = 0;
-                double.TryParse(run.GetString("msgDelayMultiplier"), out msgDelayMultiplier);
+                NumberParser.TryParseDouble(run.GetString("msgDelayMultiplier"), out msgDelayMultiplier);
                 return (run.amountOfCharsInLastMessage * msgDelayMultiplier).ToString();
             }
         }
@@ -3728,7 +4040,7 @@ namespace PluginCCS {
                 foreach (var pair in ReadOnlyPackages.Dic) {
                     string curDesc = pair.Value.desc;
                     if (curDesc != lastDesc) { body.Add(curDesc); }
-                    body.Add("    "+pair.Value.GetType().Name);
+                    body.Add("    " + pair.Value.GetType().Name);
                     lastDesc = curDesc;
                 }
                 body.AddRange(runArgDocs);
@@ -3764,7 +4076,7 @@ namespace PluginCCS {
             public override string Name => "Click Label";
 
             static string[] body = new string[] {
-                "When a script is ran from registerclick,",
+                "When a script is ran from clickevent,",
                 "there is a special group of packages that give you information about the click.",
                 "    click.button",
                 "        This can have the value of Left, Right, or Middle",
@@ -3822,12 +4134,15 @@ namespace PluginCCS {
                 "        This is similar to C \"#include\".",
                 "        All of the contents of [scriptname] will be copy-pasted into your script when it is compiled.",
                 "        For example:",
-                "-           include advlib",
+                "-           include libs/advlib",
                 "            This is useful because it allows you to use other scripts as a library of reuseable functions.",
                 "            In this example, you'd now be able to call advlib's \"#Text.print\" label from within your script.",
+                "            (docs relating to libs can be found here: https://notawesome.cc/docs/nas/)",
                 "        To include a script from an OS map, use the map named prefixed with \"os/\".",
                 "        For example:",
-                "-           include os/goodlyay+24"
+                "-           include os/goodlyay+24",
+                "        It should be noted that any Actions that run from an included script will",
+                "        respect the \"using\" statements of the script they originally came from."
             };
 
             public override List<string> Body() {
@@ -3892,12 +4207,14 @@ namespace PluginCCS {
         public readonly string scriptName;
         public readonly string scriptLabel;
         public readonly bool async;
+        public readonly object arg;
 
-        public Sevent(RunnerPerms perms, string scriptName, string scriptLabel, bool async) {
+        public Sevent(RunnerPerms perms, string scriptName, string scriptLabel, bool async, object arg = null) {
             this.perms = perms;
             this.scriptName = scriptName;
             this.scriptLabel = scriptLabel;
             this.async = async;
+            this.arg = arg;
         }
 
         public CommandData GetCommandData(Vec3S32 coords) {
@@ -3906,6 +4223,24 @@ namespace PluginCCS {
             data.Rank = perms.staffPermission ? LevelPermission.Nobody : LevelPermission.Guest;
             data.MBCoords = coords;
             return data;
+        }
+    }
+    public class SevGroup {
+        public Sevent async;
+        public Sevent sync;
+        public SevGroup() { }
+
+        public bool active => async != null || sync != null;
+        public void Register(Sevent sevent, bool isAsync) {
+            if (isAsync) { async = sevent; } else { sync = sevent; }
+        }
+
+        public void Unregister(bool isAsync) {
+            if (isAsync) { async = null; } else { sync = null; }
+        }
+        public void Reset() {
+            async = null;
+            sync = null;
         }
     }
     public class ClickInfo {
@@ -3937,7 +4272,7 @@ namespace PluginCCS {
             field = field.ToLower();
             if (field == "button") { return button.ToString(); }
             //if (field == "action") { return action.ToString(); } //Useless as action is always same
-            if (field == "coords") { return x+" "+y+" "+z; }
+            if (field == "coords") { return x + " " + y + " " + z; }
             if (field == "yaw") { return PackedToDeg(yaw).ToString(); }
             if (field == "pitch") { return PackedToDeg(pitch).ToString(); }
             if (field == "face") { return face.ToString(); }
@@ -3955,25 +4290,25 @@ namespace PluginCCS {
         public Vec3S32? stareCoords = null;
         public ReplyData[] replies = new ReplyData[CmdReplyTwo.maxReplyCount];
 
-
-        public Sevent clickEvent = null;
-        public Sevent clickEventAsync = null;
+        public SevGroup clickEvents = new SevGroup();
+        public SevGroup chatEvents = new SevGroup();
 
         public string oldModel = null;
         public string newModel = null;
 
+        private readonly object packagesLocker = new object();
         private Dictionary<string, string> strings = new Dictionary<string, string>();
         private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
         private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
 
-        private readonly object locker = new Object();
+        private readonly object activeScriptsLocker = new object();
         public void AddActiveScript(ScriptRunner runner) {
-            lock (locker) {
+            lock (activeScriptsLocker) {
                 activeScripts.Add(runner);
             }
         }
         public void RemoveActiveScript(ScriptRunner runner) {
-            lock (locker) {
+            lock (activeScriptsLocker) {
                 activeScripts.Remove(runner);
             }
         }
@@ -4041,7 +4376,7 @@ namespace PluginCCS {
 
             //p.Message("OnPlayerSpawning {0}", p.level.name);
 
-            lock (locker) {
+            lock (activeScriptsLocker) {
                 for (int i = activeScripts.Count - 1; i >= 0; i--) {
                     activeScripts[i].cancelled = true;
                     activeScripts.Remove(activeScripts[i]);
@@ -4053,8 +4388,8 @@ namespace PluginCCS {
             debugging = false;
             debuggingDelay = 0;
 
-            clickEvent = null;
-            clickEventAsync = null;
+            clickEvents.Reset();
+            chatEvents.Reset();
 
             ResetReplies();
             frozen = false;
@@ -4070,11 +4405,13 @@ namespace PluginCCS {
             if (items) { ResetDict(osItems, matcher); }
         }
         void ResetDict<T>(Dictionary<string, T> dict, string matcher) {
-            if (matcher.Length == 0) { dict.Clear(); return; }
-            List<string> keysToRemove = MatchingKeys(dict, matcher);
-            foreach (string key in keysToRemove) {
-                //p.Message("removing key {0}", key);
-                dict.Remove(key);
+            lock (packagesLocker) {
+                if (matcher.Length == 0) { dict.Clear(); return; }
+                List<string> keysToRemove = MatchingKeys(dict, matcher);
+                foreach (string key in keysToRemove) {
+                    //p.Message("removing key {0}", key);
+                    dict.Remove(key);
+                }
             }
         }
         public void ResetSavedStrings(string scriptName, string matcher) {
@@ -4099,7 +4436,7 @@ namespace PluginCCS {
 
             using (StreamWriter file = new StreamWriter(fileName, false)) {
                 foreach (KeyValuePair<string, string> entry in savedStrings) {
-                    if (entry.Value.Length == 0 || entry.Value == "0" || entry.Value.CaselessEq("false")) { continue; }
+                    if (entry.Value.Length == 0) { continue; }
                     file.WriteLine(entry.Key + " " + entry.Value);
                     //p.Message("&ewriting &0{0}&e to {1}", entry.Key+" "+entry.Value, fileName);
                 }
@@ -4133,7 +4470,7 @@ namespace PluginCCS {
                 if (!perms.staffPermission) { saved = false; }
                 return stringName;
             }
-            
+
             return (prefixedMarker + scriptName + "_" + stringName);
         }
 
@@ -4144,8 +4481,9 @@ namespace PluginCCS {
             var dict = saved ? savedStrings : strings;
             string value = "";
             string dicValue;
-            if (dict.TryGetValue(stringName, out dicValue)) { value = dicValue; }
-            //p.Message("getstring: saved is {0} and string {1} is being set to {2}", saved, stringName, value);
+            lock (packagesLocker) {
+                if (dict.TryGetValue(stringName, out dicValue)) { value = dicValue; }
+            }
             return value;
         }
         public void SetString(string stringName, string value, RunnerPerms perms, string scriptName) {
@@ -4153,8 +4491,10 @@ namespace PluginCCS {
             stringName = ValidateStringName(stringName, perms, scriptName, out saved).ToUpper();
 
             var dict = saved ? savedStrings : strings;
-            dict[stringName] = value;
-            //p.Message("setstring: saved is {0} and string {1} is being set to {2}", saved, stringName, value);
+
+            lock (packagesLocker) {
+                dict[stringName] = value;
+            }
         }
 
 
@@ -4397,11 +4737,11 @@ namespace PluginCCS {
         }
         public void UpdatePlayerReference(Player p) { this.p = p; keybinds.UpdatePlayerReference(p); }
 
-        public int GetKeyCode(string keyName) {
+        public static int GetKeyCode(Player p, string keyName) {
             int code = 0;
             if (!keyCodes.TryGetValue(keyName.ToUpper(), out code)) {
-                p.Message("&cUnrecognized key name \"{0}\". Please see https://minecraft.fandom.com/el/wiki/Key_codes#Full_table for valid key names.", keyName);
-                p.Message("&bRemember to use the NAME of the key and not the numerical code/value!");
+                p.Message("&cUnrecognized key name \"{0}\". Please see https://notawesome.cc/docs/nas/keycodes.txt for valid key names.", keyName);
+                p.Message("&bRemember to use the NAME of the key and not a numerical code/value!");
             }
             return code;
         }
@@ -4412,6 +4752,19 @@ namespace PluginCCS {
             return null;
         }
 
+
+        /// <summary>
+        /// Static version of hotkey.Define for use by other plugins
+        /// </summary>
+        public static void DefineFor(Player p, string action, string fullAction, int keyCode, byte modifiers) {
+            Core.GetScriptData(p).hotkeys.Define(action, fullAction, keyCode, modifiers);
+        }
+        /// <summary>
+        /// Static version of hotkey.Undefine for use by other plugins
+        /// </summary>
+        public static void UndefineFor(Player p, int keyCode, byte modifiers) {
+            Core.GetScriptData(p).hotkeys.Undefine(keyCode, modifiers);
+        }
         /// <summary>
         /// Used in script action. Respects keybinds
         /// </summary>
@@ -4610,8 +4963,8 @@ namespace PluginCCS {
                 int key;
                 int value;
 
-                if (!int.TryParse(bits[0], out key)) { continue; }
-                if (!int.TryParse(bits[1], out value)) { continue; }
+                if (!NumberParser.TryParseInt(bits[0], out key)) { continue; }
+                if (!NumberParser.TryParseInt(bits[1], out value)) { continue; }
 
                 binds.Add(new BindPair(new KeyBind(key), new KeyBind(value)));
             }
@@ -4813,6 +5166,18 @@ namespace PluginCCS {
             if (!CommandParser.GetReal(p, arg, axis, ref value)) return false;
             if (relative) value += cur;
             return true;
+        }
+    }
+
+    public static class NumberParser {
+
+        static NumberStyles intStyle = NumberStyles.AllowLeadingSign;
+        static NumberStyles doubleStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
+        public static bool TryParseInt(string arg, out int value) {
+            return Int32.TryParse(arg, intStyle, CultureInfo.InvariantCulture, out value);
+        }
+        public static bool TryParseDouble(string arg, out double value) {
+            return double.TryParse(arg, doubleStyle, CultureInfo.InvariantCulture, out value);
         }
     }
 
