@@ -970,7 +970,7 @@ namespace PluginCCS {
         public override bool MessageBlockRestricted { get { return true; } }
         public override string type { get { return "other"; } }
         public override bool museumUsable { get { return false; } }
-        public override LevelPermission defaultRank { get { return LevelPermission.Admin; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
         public override bool UpdatesLastCmd { get { return false; } }
         public override bool LogUsage { get { return false; } }
         public override CommandPerm[] ExtraPerms {
