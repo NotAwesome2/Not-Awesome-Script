@@ -22,6 +22,7 @@ using BlockID = System.UInt16;
 using ExtraLevelProps;
 using NA2;
 using System.Globalization;
+using MCGalaxy.Tasks;
 
 //COLLAPSE EVERYTHING IN VS WITH CTRL M A
 namespace PluginCCS {
@@ -62,7 +63,7 @@ namespace PluginCCS {
             p.Message("%HMake sure to use a / if it is a command.");
         }
     }
-    
+
     /// <summary>
     /// Base class for commands that need to throw script errors when there are invalid user args.
     /// </summary>
@@ -666,6 +667,7 @@ namespace PluginCCS {
             ReadOnlyPackages.PluginLoad();
             Docs.PluginLoad();
             Keybinds.PluginLoad();
+            PersistentAnnouncements.PluginLoad();
 
             tempBlockCmd = new CmdTempBlock();
             tempChunkCmd = new CmdTempChunk();
@@ -714,6 +716,8 @@ namespace PluginCCS {
         public override void Unload(bool shutdown) {
             ExtraLevelProps.ExtraLevelProps.Unregister(inputProp);
             ExtraLevelProps.ExtraLevelProps.Unregister(savePlayerScriptDataProp);
+
+            PersistentAnnouncements.PluginUnload();
 
             Command.Unregister(tempBlockCmd);
             Command.Unregister(tempChunkCmd);
@@ -790,12 +794,11 @@ namespace PluginCCS {
                 CpeMessageType type = CmdReplyTwo.GetReplyMessageType(i);
                 if (type != CpeMessageType.Normal) { p.SendCpeMessage(type, "", ScriptRunner.CpeMessagePriority); }
             }
-            p.SendCpeMessage(CpeMessageType.BigAnnouncement, "");
-            p.SendCpeMessage(CpeMessageType.Announcement, "");
-            p.SendCpeMessage(CpeMessageType.SmallAnnouncement, "");
 
             ScriptData data;
-            if (scriptDataAtPlayer.TryGetValue(p.name, out data)) { data.OnPlayerSpawning(); }
+            if (scriptDataAtPlayer.TryGetValue(p.name, out data)) {
+                data.OnPlayerSpawning();
+            }
         }
         static void OnInfoSwap(string source, string dest) {
             string sourcePath = ScriptData.savePath + source;
@@ -1654,17 +1657,19 @@ namespace PluginCCS {
         }
 
         static byte? GetEnvColorType(string type) {
-            if (type.CaselessEq("sky")) { return 0; }
-            if (type.CaselessEq("cloud")) { return 1; }
-            if (type.CaselessEq("clouds")) { return 1; }
-            if (type.CaselessEq("fog")) { return 2; }
-            if (type.CaselessEq("shadow")) { return 3; }
-            if (type.CaselessEq("sun")) { return 4; }
-            if (type.CaselessEq("skybox")) { return 5; }
+            if (type.CaselessEq("sky"))       { return 0; }
+            if (type.CaselessEq("cloud"))     { return 1; }
+            if (type.CaselessEq("clouds"))    { return 1; }
+            if (type.CaselessEq("fog"))       { return 2; }
+            if (type.CaselessEq("shadow"))    { return 3; }
+            if (type.CaselessEq("sun"))       { return 4; }
+            if (type.CaselessEq("skybox"))    { return 5; }
+            if (type.CaselessEq("lavalight")) { return 6; }
+            if (type.CaselessEq("lamplight")) { return 7; }
             return null;
         }
         static byte? GetEnvWeatherType(string type) {
-            if (type.CaselessEq("sun")) { return 0; }
+            if (type.CaselessEq("sun"))  { return 0; }
             if (type.CaselessEq("rain")) { return 1; }
             if (type.CaselessEq("snow")) { return 2; }
             return null;
@@ -2356,7 +2361,7 @@ namespace PluginCCS {
                 "    same as msg, but allows you to send to the other special chat fields in top right, bottom right, or center.",
                 "    valid cpe message fields are: top1, top2, top3, bot1, bot2, bot3, announce, bigannounce, smallannounce",
                 "    However, unlike msg, these are limited to 64 characters at most. Remember, color codes count as 2 characters!",
-                "    The \"announce\" fields automatically disappears after 5 seconds.\",",
+                "    The \"announce\" fields automatically disappear after 5 seconds.\",",
                 "    The rest stay forever unless you reset them by sending a completely blank message (or the player leaves the map).",
                 "    Blank example: \"cpemsg bot3\"",
             };
@@ -2370,6 +2375,25 @@ namespace PluginCCS {
                     run.amountOfCharsInLastMessage = run.cmdArgs.Length;
                 }
                 run.p.SendCpeMessage(type, run.cmdArgs, ScriptRunner.CpeMessagePriority);
+            }
+        }
+        public class MenuMessage : ScriptAction {
+            public override string[] documentation => new string[] {
+                "[cpe message field] <message>",
+                "    same as cpemsg for announcements, but stays on the screen instead of disappearing after 5 seconds.",
+                "    valid cpe message fields are: announce, bigannounce, smallannounce",
+            };
+
+            public override string name => "menumsg";
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdName == "") { run.Error("Not enough arguments for menumsg"); return; }
+                CpeMessageType type = ScriptRunner.GetCpeMessageType(run.cmdName);
+                if (type == CpeMessageType.Announcement || type == CpeMessageType.BigAnnouncement || type == CpeMessageType.SmallAnnouncement) {
+                    run.scriptData.persistentAnnouncements.SendAnnouncement(type, run.cmdArgs);
+                    return;
+                }
+                run.Error("Invalid cpe message type for {0}", name);
             }
         }
 
@@ -3030,6 +3054,8 @@ namespace PluginCCS {
                 "        shadow [hex color]",
                 "        sun [hex color]",
                 "        skybox [hex color]",
+                "        lavalight [hex color]",
+                "        lamplight [hex color]",
                 "        weather [sun/rain/snow]",
                 "        maxfog [distance in blocks]",
                 "        expfog [on/off]",
@@ -4335,6 +4361,7 @@ namespace PluginCCS {
 
 
         public Hotkeys hotkeys;
+        public PersistentAnnouncements persistentAnnouncements;
 
         private void SetRepliesNull() {
             for (int i = 0; i < replies.Length; i++) {
@@ -4354,6 +4381,7 @@ namespace PluginCCS {
             this.p = p;
             SetRepliesNull();
             hotkeys = new Hotkeys(p);
+            persistentAnnouncements = new PersistentAnnouncements(p);
 
 
             string filePath, fileName;
@@ -4371,6 +4399,7 @@ namespace PluginCCS {
         public void UpdatePlayerReference(Player p) {
             this.p = p;
             hotkeys.UpdatePlayerReference(p);
+            persistentAnnouncements.UpdatePlayerReference(p);
         }
         public void OnPlayerSpawning() {
 
@@ -4390,6 +4419,7 @@ namespace PluginCCS {
 
             clickEvents.Reset();
             chatEvents.Reset();
+            persistentAnnouncements.Clear();
 
             ResetReplies();
             frozen = false;
@@ -4551,6 +4581,65 @@ namespace PluginCCS {
         }
         //#endregion
 
+    }
+
+    public class PersistentAnnouncements {
+
+        static Scheduler scheduler;
+        static SchedulerTask task;
+        public static void PluginLoad() {
+            scheduler = new Scheduler("PersistentAnnouncementsScheduler");
+            task = scheduler.QueueRepeat(PersistAll, null, TimeSpan.FromSeconds(4));
+        }
+        public static void PluginUnload() {
+            scheduler.Cancel(task);
+        }
+        public static void PersistAll(SchedulerTask task) {
+            Player[] players = PlayerInfo.Online.Items;
+            foreach (Player p in players) {
+                ScriptData sd = Core.GetScriptData(p);
+                sd.persistentAnnouncements.Persist();
+            }
+        }
+
+        Player p;
+        
+        const int AnnouncementFieldsCount = 3;
+        string[] fields = new string[AnnouncementFieldsCount];
+        readonly object locker = new object();
+        public PersistentAnnouncements(Player p) {
+            this.p = p;
+            for (int i = 0; i < fields.Length; i++) { fields[i] = ""; }
+        }
+        public void UpdatePlayerReference(Player p) {
+            this.p = p;
+        }
+        public void SendAnnouncement(CpeMessageType type, string message) {
+            int i = (int)type - (int)CpeMessageType.Announcement;
+            lock (locker) {
+                fields[i] = message;
+                SendAnnounce(i);
+            }
+        }
+        void Persist() {
+            lock(locker) {
+                for (int i = 0; i < fields.Length; i++) {
+                    if (fields[i] == "") { continue; }
+                    SendAnnounce(i);
+                }
+            }
+        }
+        void SendAnnounce(int i) {
+            p.SendCpeMessage((CpeMessageType)((int)CpeMessageType.Announcement + i), fields[i], ScriptRunner.CpeMessagePriority);
+        }
+        public void Clear() {
+            lock (locker) {
+                for (int i = 0; i < fields.Length; i++) {
+                    fields[i] = "";
+                    SendAnnounce(i);
+                }
+            }
+        }
     }
 
     public class Hotkeys {
