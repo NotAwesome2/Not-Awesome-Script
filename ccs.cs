@@ -23,6 +23,7 @@ using ExtraLevelProps;
 using NA2;
 using System.Globalization;
 using MCGalaxy.Tasks;
+using System.Diagnostics;
 
 //COLLAPSE EVERYTHING IN VS WITH CTRL M A
 namespace PluginCCS {
@@ -605,7 +606,7 @@ namespace PluginCCS {
         public override string creator { get { return "Goodly"; } }
         const string DEBUG_MESSAGE_TARGET = "goodlyay+";
         public override string name { get { return "ccs"; } }
-        public override string MCGalaxy_Version { get { return "1.9.3.9"; } }
+        public override string MCGalaxy_Version { get { return "1.9.5.0"; } }
 
         static readonly object scriptDataLocker = new object();
 
@@ -788,6 +789,8 @@ namespace PluginCCS {
         static void OnPlayerSpawning(Player p, ref Position pos, ref byte yaw, ref byte pitch, bool respawning) {
             if (respawning) { return; } //Only call when spawning in a new level
 
+            //Reset cinematic gui when changing levels
+            ScriptActions.Gui.ResetFor(p);
 
             //clear all persistent chat lines at the priority used by cpemessage in script
             for (int i = 1; i < CmdReplyTwo.maxReplyCount + 1; i++) {
@@ -1726,7 +1729,7 @@ namespace PluginCCS {
             cmd = null;
             Command.Search(ref cmdName, ref cmdArgs);
             if (!perms.staffPermission && (cmdName.CaselessEq("runscript") || cmdName.CaselessEq(Core.runscriptCmd.name))) {
-                Error("%cCommand \"{0}\" is blacklisted from being used in scripts.");
+                Error("Command \"{0}\" is blacklisted from being used in scripts.", cmdName);
                 return false;
             }
             cmd = Command.Find(cmdName);
@@ -1739,7 +1742,7 @@ namespace PluginCCS {
         CommandData GetCommandData() {
             CommandData data = default(CommandData);
             data.Context = CommandContext.MessageBlock;
-            data.Rank = perms.staffPermission ? LevelPermission.Nobody : LevelPermission.Guest;
+            data.Rank = perms.staffPermission ? p.group.Permission : LevelPermission.Guest;
             data.MBCoords = this.cmdData.MBCoords;
             return data;
         }
@@ -1752,7 +1755,7 @@ namespace PluginCCS {
             }
             CommandPerms commandPerms = CommandPerms.Find(cmd.name);
             if (!commandPerms.UsableBy(data.Rank)) {
-                Error("OS scripts can only run commands with a permission of member or lower.", data.Rank);
+                Error("This script can only run commands with a permission of {0} or lower.", data.Rank);
                 p.Message("Therefore, \"{0}\" cannot be ran.", cmd.name);
                 return;
             }
@@ -2100,7 +2103,8 @@ namespace PluginCCS {
             try {
                 line.actionType.Behavior(this);
             } catch (Exception e) {
-                Error("C# runtime error: {0}", e.Message);
+                Error("C# runtime error: {0}", e);
+                throw;
             }
 
             if (scriptData.debugging && scriptData.debuggingDelay > 0) { Thread.Sleep(scriptData.debuggingDelay); }
@@ -3717,6 +3721,80 @@ namespace PluginCCS {
                     return;
                 }
                 run.Error("Custom error: {0}", run.args);
+            }
+        }
+
+        public class Gui : ScriptAction {
+            public override string[] documentation => new string[] {
+                "[option] [value]",
+                "    Change properties of the player's gui to achieve cinematic effects.",
+                "    Valid properties are:",
+                "       crosshair [true/false]",
+                "       hand [true/false]",
+                "       hotbar [true/false]",
+                "       barSize [decimal from 0 to 1]",
+                "       barColor [hex color] <alpha>",
+                "   Bar size works like widescreen or cutscene bars. You can use 1 to completely cover the screen.",
+                "   <alpha> for bar color is an optional value from 0 to 1 that determines bar transparency.",
+                "   0 means completely transparent and 1 means solid.",
+                "gui reset",
+                "    Resets the player's gui to default.",
+            };
+
+            public static void ResetFor(Player p) {
+                p.CinematicGui = new CinematicGui();
+                p.Session.SendCinematicGui(p.CinematicGui);
+            }
+            public override string name => "gui";
+
+            public override void Behavior(ScriptRunner run) {
+                switch (run.cmdName.ToLower()) {
+                    case "crosshair":
+                        bool showCrosshair = false;
+                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showCrosshair)) return;
+                        run.p.CinematicGui.hideCrosshair = !showCrosshair;
+                        break;
+                    case "hand":
+                        bool showHand = false;
+                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showHand)) return;
+                        run.p.CinematicGui.hideHand = !showHand;
+                        break;
+                    case "hotbar":
+                        bool showHotbar = false;
+                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showHotbar)) return;
+                        run.p.CinematicGui.hideHotbar = !showHotbar;
+                        break;
+                    case "barsize":
+                        float size = 0;
+                        if (!CommandParser.GetReal(run.p, run.cmdArgs, "bar size", ref size)) return;
+                        run.p.CinematicGui.barSize = size;
+                        break;
+                    case "barcolor":
+                        ColorDesc c;
+                        string[] args = run.cmdArgs.SplitSpaces();
+                        if (!Colors.TryParseHex(args[0], out c)) {
+                            run.p.Message("&WInvalid hex color \"{0}\" for barcolor.", run.cmdArgs);
+                            return;
+                        }
+                        if (args.Length > 1) {
+                            float alpha = 0;
+                            if (!CommandParser.GetReal(run.p, args[1], "bar color opaqueness", ref alpha)) return;
+                            //Bounds checking outside of the command parser to make script more lenient
+                            //We want to be able to just send out-of-range values and it still works
+                            if (alpha < 0) alpha = 0;
+                            if (alpha > 1) alpha = 1;
+                            c.A = (byte)(alpha * byte.MaxValue);
+                        }
+                        run.p.CinematicGui.barColor = c;
+                        break;
+                    case "reset":
+                        ResetFor(run.p);
+                        return; //ResetFor handles sending the packet
+                    default:
+                        run.Error("There is no gui option \"{0}\".", run.args);
+                        break;
+                }
+                run.p.Session.SendCinematicGui(run.p.CinematicGui);
             }
         }
     }
