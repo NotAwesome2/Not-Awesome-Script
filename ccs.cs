@@ -568,14 +568,15 @@ namespace PluginCCS {
 
         public override void Use(Player p, string message, CommandData data) {
             if (!Script.OsAllowed(p)) { return; }
-            if (!LevelInfo.IsRealmOwner(p.name, p.level.name)) { p.Message("You can only upload scripts to maps that you own."); return; }
+            string levelName = p.level.name; //cache the level so that it won't change if the user switches map while the command is running
+            if (!LevelInfo.IsRealmOwner(p.name, levelName)) { p.Message("You can only upload scripts to maps that you own."); return; }
             if (message.Length == 0) { p.Message("%cYou need to provide a url of the file that will be used as your map's script."); return; }
 
             HttpUtil.FilterURL(ref message);
             byte[] webData = HttpUtil.DownloadData(message, p);
             if (webData == null) { return; }
 
-            Script.Update(p, Script.OS_PREFIX + p.level.name.ToLower(), webData);
+            Script.Update(p, Script.OS_PREFIX + levelName.ToLower(), webData);
         }
 
         public override void Help(Player p) {
@@ -2342,15 +2343,15 @@ namespace PluginCCS {
         }
 
         public class Message : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[message]",
                 "    sends a message to the player.",
                 "    Use @p to substitute the player's name (includes the +)",
                 "    Use @nick to subtitute for a more natural version of player's name (e.g. Mike_30+ becomes Mike)",
                 "    Use @color to substitute for the player's currently set color code"
-            };
+            }; } }
 
-            public override string name => "msg";
+            public override string name { get { return "msg"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (!(run.hasCef && run.curLine.uses.cef) && ScriptRunner.isCefMessage(run.args)) { return; }
@@ -2360,7 +2361,7 @@ namespace PluginCCS {
         }
 
         public class CpeMessage : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[cpe message field] <message>",
                 "    same as msg, but allows you to send to the other special chat fields in top right, bottom right, or center.",
                 "    valid cpe message fields are: top1, top2, top3, bot1, bot2, bot3, announce, bigannounce, smallannounce",
@@ -2368,9 +2369,9 @@ namespace PluginCCS {
                 "    The \"announce\" fields automatically disappear after 5 seconds.\",",
                 "    The rest stay forever unless you reset them by sending a completely blank message (or the player leaves the map).",
                 "    Blank example: \"cpemsg bot3\"",
-            };
+            }; } }
 
-            public override string name => "cpemsg";
+            public override string name { get { return "cpemsg"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName == "") { run.Error("Not enough arguments for cpemsg"); return; }
@@ -2382,13 +2383,13 @@ namespace PluginCCS {
             }
         }
         public class MenuMessage : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[cpe message field] <message>",
                 "    same as cpemsg for announcements, but stays on the screen instead of disappearing after 5 seconds.",
                 "    valid cpe message fields are: announce, bigannounce, smallannounce",
-            };
+            }; } }
 
-            public override string name => "menumsg";
+            public override string name { get { return "menumsg"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName == "") { run.Error("Not enough arguments for menumsg"); return; }
@@ -2402,12 +2403,12 @@ namespace PluginCCS {
         }
 
         public class Delay : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[number or package]",
                 "    Makes the script pause for the amount of milliseconds specified.",
-            };
+            }; } }
 
-            public override string name => "delay";
+            public override string name { get { return "delay"; } }
 
             public override void Behavior(ScriptRunner run) {
                 int delay;
@@ -2417,12 +2418,12 @@ namespace PluginCCS {
         }
 
         public class Jump : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    Makes the script go to the specified label and keep running from there.",
-            };
+            }; } }
 
-            public override string name => "jump";
+            public override string name { get { return "jump"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] newRunArgs = run.args.Split(ScriptRunner.pipeChar);
@@ -2436,14 +2437,14 @@ namespace PluginCCS {
         }
 
         public class Goto : Jump {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    This is the same as jump, but with a big exception:",
                 "    If you use \"goto\" in a label that you called with the \"call\" Action, then the script will not come back to run what was after the call.",
                 "    In other words, this performs a jump and clears the call stack",
-            };
+            }; } }
 
-            public override string name => "goto";
+            public override string name { get { return "goto"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.comebackToIndex.Clear();
@@ -2452,13 +2453,13 @@ namespace PluginCCS {
         }
 
         public class Call : Jump {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    Like jump, but once it reaches a \"quit\" in the [#label] called, instead of quitting, it will come back and run what comes after the call.",
                 "    This is useful because it lets you repeat a set of actions many times without copy pasting the actions all over the place.",
-            };
+            }; } }
 
-            public override string name => "call";
+            public override string name { get { return "call"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.comebackToIndex.Add(run.actionIndex);
@@ -2467,14 +2468,14 @@ namespace PluginCCS {
         }
 
         public class Quit : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "",
                 "    Typically this tells the script to stop running.",
                 "    If we are in a label ran with the \"call\" Action, this causes the script to return to where it was called from.",
                 "    Be careful not to forget this. Without a \"quit\", the script will keep running and do actions from other labels below.",
-            };
+            }; } }
 
-            public override string name => "quit";
+            public override string name { get { return "quit"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.comebackToIndex.Count == 0) { Terminate.Do(run); return; }
@@ -2488,12 +2489,12 @@ namespace PluginCCS {
         }
 
         public class Terminate : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "",
                 "    This tells the script to stop running completely, even if we are in a nested label that was called from somewhere else using \"call\"",
-            };
+            }; } }
 
-            public override string name => "terminate";
+            public override string name { get { return "terminate"; } }
 
             public override void Behavior(ScriptRunner run) {
                 Do(run);
@@ -2511,14 +2512,14 @@ namespace PluginCCS {
         }
 
         public class NewThread : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    Like call, but allows the script to continue running without taking into account any of the delays in the label you called.",
                 "    This action may take a little bit of time to start up. If you want to make sure it always occurs BEFORE the actions you put next,",
                 "    you should add a little bit of delay (around 500 perhaps) after doing a newthread action.",
-            };
+            }; } }
 
-            public override string name => "newthread";
+            public override string name { get { return "newthread"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName.Length == 0) { run.Error("Please specify a label and or runArgs for the newthread to run with."); return; }
@@ -2547,13 +2548,13 @@ namespace PluginCCS {
         }
 
         public class Cmd : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[command] <command arguments>",
                 "    Runs the given command with the given arguments.",
                 "    You can use @p and @nick to substitute player names just like in msg.",
-            };
+            }; } }
 
-            public override string name => "cmd";
+            public override string name { get { return "cmd"; } }
 
             public override void Behavior(ScriptRunner run) {
                 Command cmd = null;
@@ -2565,7 +2566,7 @@ namespace PluginCCS {
         }
 
         public class Set : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [value]",
                 "    Sets the [value] of [package]. If you want to set the value of a package to the value of another package, you have to unwrap it in the value argument with { }.",
                 "    For example:",
@@ -2573,9 +2574,9 @@ namespace PluginCCS {
                 "-       set myHealth {maxHealth}",
                 "    This results in myHealth with a value of \"10\".",
                 "    If you fail to unwrap maxHealth you would be left with a text value of \"maxHealth\" for myHealth, which is definitely not what you want in this case.",
-            };
+            }; } }
 
-            public override string name => "set";
+            public override string name { get { return "set"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.SetString(run.cmdName, run.cmdArgs);
@@ -2583,9 +2584,9 @@ namespace PluginCCS {
         }
 
         public abstract class SetMath : ScriptAction {
-            public override string[] documentation => throw new MemberAccessException();
+            public override string[] documentation { get { throw new MemberAccessException(); } }
 
-            public override string name => throw new MemberAccessException();
+            public override string name { get { throw new MemberAccessException(); } }
 
             public override void Behavior(ScriptRunner run) {
                 double a, b, result;
@@ -2611,7 +2612,7 @@ namespace PluginCCS {
             protected abstract double Op(double a, double b);
         }
         public class SetAdd : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Adds the second argument to the first argument.",
                 "    For example:",
@@ -2623,45 +2624,45 @@ namespace PluginCCS {
                 "    Or use a literal number:",
                 "-       setadd myHealth 3",
                 "    This results in myHealth with a value of \"13\" (assuming it was 10 to begin with).",
-            };
+            }; } }
 
-            public override string name => "setadd";
+            public override string name { get { return "setadd"; } }
 
             protected override double Op(double a, double b) {
                 return a + b;
             }
         }
         public class SetSub : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Same as setadd, but subtracts.",
-            };
+            }; } }
 
-            public override string name => "setsub";
+            public override string name { get { return "setsub"; } }
 
             protected override double Op(double a, double b) {
                 return a - b;
             }
         }
         public class SetMul : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Same as setadd, but multiplies.",
-            };
+            }; } }
 
-            public override string name => "setmul";
+            public override string name { get { return "setmul"; } }
 
             protected override double Op(double a, double b) {
                 return a * b;
             }
         }
         public class SetDiv : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Same as setadd, but divides.",
-            };
+            }; } }
 
-            public override string name => "setdiv";
+            public override string name { get { return "setdiv"; } }
 
             protected override double Op(double a, double b) {
                 if (b == 0) throw new DivideByZeroException();
@@ -2669,13 +2670,13 @@ namespace PluginCCS {
             }
         }
         public class SetMod : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Sets the first argument to the remainder of an integer division between the first argument and the second argument.",
                 "    This is the equivalent of \"firstArg = firstArg % secondArg;\" in c-like languages.",
-            };
+            }; } }
 
-            public override string name => "setmod";
+            public override string name { get { return "setmod"; } }
 
             protected override double Op(double a, double b) {
                 if (b == 0) throw new DivideByZeroException();
@@ -2686,62 +2687,62 @@ namespace PluginCCS {
             }
         }
         public class SetPow : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Performs a math \"power of\" operation on [package] and sets that as its new value.",
                 "    For instance, with 3 as the second arg, you can calculate the 3D volume of a number.",
-            };
+            }; } }
 
-            public override string name => "setpow";
+            public override string name { get { return "setpow"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Pow(a, b);
             }
         }
         public class SetSin : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates sine of [number or package] and inserts it into [package]",
-            };
+            }; } }
 
-            public override string name => "setsin";
+            public override string name { get { return "setsin"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Sin(b);
             }
         }
         public class SetCos : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates cosine of [number or package] and inserts it into [package]",
-            };
+            }; } }
 
-            public override string name => "setcos";
+            public override string name { get { return "setcos"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Cos(b);
             }
         }
         public class SetTan : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates the tangent of [number or package] and inserts it into [package].",
                 "    The specified angle will be treated as radians.",
-            };
+            }; } }
 
-            public override string name => "settan";
+            public override string name { get { return "settan"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Tan(b);
             }
         }
         public class SetSqrt : SetMath {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates the square root of [number or package] and inserts it into [package].",
-            };
+            }; } }
 
-            public override string name => "setsqrt";
+            public override string name { get { return "setsqrt"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Sqrt(b);
@@ -2749,15 +2750,15 @@ namespace PluginCCS {
         }
 
         public class SetRandRange : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package] [number or package]",
                 "    Sets the first argument to a random integer that is within the range of the second and third args.",
                 "    For example:",
                 "-       setrandrange attackDamage 1 5",
                 "    attackDamage can have the value of 1, 2, 3, 4, or 5, randomly chosen.",
-            };
+            }; } }
 
-            public override string name => "setrandrange";
+            public override string name { get { return "setrandrange"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
@@ -2770,16 +2771,16 @@ namespace PluginCCS {
             }
         }
         public class SetRandRangeDecimal : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package] [number or package]",
                 "    Sets the first argument to a random number that is within the range of the second and third args.",
                 "    This is identical to setrandrange, except this time the range can truly result in any number, and will most often be something fractional with a decimal place.",
                 "    For example:",
                 "-       setrandrangedecimal attackDamage 1 5",
                 "    attackDamage could have a value of 0.306, 2.4553, 4.853, etc.",
-            };
+            }; } }
 
-            public override string name => "setrandrangedecimal";
+            public override string name { get { return "setrandrangedecimal"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
@@ -2792,16 +2793,16 @@ namespace PluginCCS {
             }
         }
         public class SetRandList : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [value1]|[value2]|[value3] etc...",
                 "    Sets the first argument to one of the given values that are separated by the | symbol.",
                 "    For example:",
                 "-       setrandlist myWarriorName Zog the Destroyer|Kron the Cunning|Dunidas of Kas",
                 "    myWarriorName could be \"Zog the Destroyer\", \"Kron the Cunning\", or \"Dunidas of Kas\", chosen randomly.",
                 "    Note that if you want to use a package as one or more of the values you must unwrap it, just like the set action.",
-            };
+            }; } }
 
-            public override string name => "setrandlist";
+            public override string name { get { return "setrandlist"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdArgs == "") { run.Error("SetRandList requires a list of values to choose from separated by the | character."); return; }
@@ -2810,9 +2811,9 @@ namespace PluginCCS {
         }
 
         public abstract class SetRoundCore : ScriptAction {
-            public override string[] documentation => throw new MemberAccessException();
+            public override string[] documentation { get { throw new MemberAccessException(); } }
 
-            public override string name => throw new MemberAccessException();
+            public override string name { get { throw new MemberAccessException(); } }
 
             public override void Behavior(ScriptRunner run) {
                 double value;
@@ -2824,37 +2825,37 @@ namespace PluginCCS {
             protected abstract double Op(double value);
         }
         public class SetRound : SetRoundCore {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package]",
                 "    Rounds the value of the package to the nearest integer.",
                 "    For example, 1.2 rounds to 1 and 1.6 rounds to 2. If the number ends with .5, it will round up.",
-            };
+            }; } }
 
-            public override string name => "setround";
+            public override string name { get { return "setround"; } }
 
             protected override double Op(double value) {
                 return Math.Round(value, MidpointRounding.AwayFromZero);
             }
         }
         public class SetRoundUp : SetRoundCore {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package]",
                 "    Rounds the value of the package up to the next integer. For example, 1.1 becomes 2.",
-            };
+            }; } }
 
-            public override string name => "setroundup";
+            public override string name { get { return "setroundup"; } }
 
             protected override double Op(double value) {
                 return Math.Ceiling(value);
             }
         }
         public class SetRoundDown : SetRoundCore {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package]",
                 "    Rounds the value of the package down to the next integer. For example, 1.9 becomes 1.",
-            };
+            }; } }
 
-            public override string name => "setrounddown";
+            public override string name { get { return "setrounddown"; } }
 
             protected override double Op(double value) {
                 return Math.Floor(value);
@@ -2862,15 +2863,15 @@ namespace PluginCCS {
         }
 
         public class Show : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] <another package> <another package> etc...",
                 "    Displays the value of all the packages given, for testing and debug purposes.",
                 "    All but the first argument is optional.",
                 "show every single package",
                 "    Displays every single non-saved package",
-            };
+            }; } }
 
-            public override string name => "show";
+            public override string name { get { return "show"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.args.CaselessEq("every single package")) {
@@ -2905,14 +2906,14 @@ namespace PluginCCS {
         }
 
         public class Kill : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "<message>",
                 "    Kills the player with an optional public death message.",
                 "    The <message> is shown to everyone who is playing on the map.",
                 "    Because of this, it's highly recommended to not use the <message> argument, and instead use msg to tell the player directly why they died.",
-            };
+            }; } }
 
-            public override string name => "kill";
+            public override string name { get { return "kill"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.p.HandleDeath(Block.Cobblestone, run.args, false, true);
@@ -2920,7 +2921,7 @@ namespace PluginCCS {
         }
 
         public class ResetData : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[type] <pattern>",
                 "    Used to reset data.",
                 "    [type] can be",
@@ -2941,9 +2942,9 @@ namespace PluginCCS {
                 "            This resets all packages which have \"old\" anywhere in the name.",
                 "            Note: this is actually identical to",
                 "-           resetdata packages *old*",
-            };
+            }; } }
 
-            public override string name => "resetdata";
+            public override string name { get { return "resetdata"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName.CaselessStarts("packages")) {
@@ -2965,14 +2966,14 @@ namespace PluginCCS {
         }
 
         public class Item : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[get/take] [ITEM_NAME]",
                 "    Gives an item to the player or takes an item from the player.",
                 "    You must use underscores instead of spaces for the item name, especially when checking if the player has an item (see \"Conditions\" further down).",
                 "    This is silent if you \"get\" an item when the player already has said item, and silent if you \"take\" an item when the player doesn't have said item.",
-            };
+            }; } }
 
-            public override string name => "item";
+            public override string name { get { return "item"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdArgs == "") { run.Error("Not enough arguments for Item action"); return; }
@@ -2983,12 +2984,12 @@ namespace PluginCCS {
         }
 
         public class Freeze : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "",
                 "    Freezes the player in place. They can still fall if mid-air or swim up and down in liquid or ladders, though.",
-            };
+            }; } }
 
-            public override string name => "freeze";
+            public override string name { get { return "freeze"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.scriptData.frozen = true;
@@ -2996,12 +2997,12 @@ namespace PluginCCS {
             }
         }
         public class Unfreeze : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "",
                 "    Unfreezes the player.",
-            };
+            }; } }
 
-            public override string name => "unfreeze";
+            public override string name { get { return "unfreeze"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.scriptData.frozen = false;
@@ -3015,12 +3016,12 @@ namespace PluginCCS {
         }
 
         public class Look : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[block coordinates]",
                 "    Makes the player look at the given coordinates. They can move their camera afterwards.",
-            };
+            }; } }
 
-            public override string name => "look";
+            public override string name { get { return "look"; } }
 
             public override void Behavior(ScriptRunner run) {
                 Vec3S32 coords;
@@ -3029,12 +3030,12 @@ namespace PluginCCS {
             }
         }
         public class Stare : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "<block coordinates>",
                 "    Forces the player to continually stare at the given coordinates. You can free their camera by not providing any coordinates to this action.",
-            };
+            }; } }
 
-            public override string name => "stare";
+            public override string name { get { return "stare"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.args == "") { run.scriptData.stareCoords = null; return; }
@@ -3046,7 +3047,7 @@ namespace PluginCCS {
         }
 
         public class Env : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[property] [value]",
                 "    Temporarily changes env values for the player who runs the script.",
                 "    Valid properties are currently:",
@@ -3063,9 +3064,9 @@ namespace PluginCCS {
                 "        weather [sun/rain/snow]",
                 "        maxfog [distance in blocks]",
                 "        expfog [on/off]",
-            };
+            }; } }
 
-            public override string name => "env";
+            public override string name { get { return "env"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.SetEnv(run.args);
@@ -3073,16 +3074,16 @@ namespace PluginCCS {
         }
 
         public class MOTD : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[motd arguments]",
                 "    Sends an MOTD to the player to control hacks using hacks flags.",
                 "    To see a list of flags you can use, type /help map motd",
                 "    2021/12/11: jumpheight works too now",
                 "motd ignore",
                 "    Resets to the default MOTD of the map.",
-            };
+            }; } }
 
-            public override string name => "motd";
+            public override string name { get { return "motd"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.args.CaselessEq("ignore")) {
@@ -3098,13 +3099,13 @@ namespace PluginCCS {
         }
 
         public class SetSpawn : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[block coords]",
                 "    Sets the spawn of the player to the coordinates provided.",
                 "    Decimal values are supported.",
-            };
+            }; } }
 
-            public override string name => "setspawn";
+            public override string name { get { return "setspawn"; } }
 
             public override void Behavior(ScriptRunner run) {
                 Vec3F32 coords;
@@ -3127,12 +3128,12 @@ namespace PluginCCS {
             }
         }
         public class SetDeathSpawn : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[block coords]",
                 "    Changes where the player will spawn after dying.",
-            };
+            }; } }
 
-            public override string name => "setdeathspawn";
+            public override string name { get { return "setdeathspawn"; } }
 
             public override void Behavior(ScriptRunner run) {
                 Vec3S32 coords;
@@ -3161,12 +3162,12 @@ namespace PluginCCS {
             }
         }
         public class AllowMBRepeat : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "",
                 "    Allows the next walk-through MB to be triggered, even if it's the same as the previously touched MB.",
-            };
+            }; } }
 
-            public override string name => "allowmbrepeat";
+            public override string name { get { return "allowmbrepeat"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.allowMBrepeat = true;
@@ -3174,7 +3175,7 @@ namespace PluginCCS {
         }
 
         public class Reply : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[option number]|[text shown to player]|[#label to call if chosen]",
                 "    Sets up a reply option, which can be chosen by the player by typing [option number] in chat",
                 "    For example:",
@@ -3188,25 +3189,25 @@ namespace PluginCCS {
                 "    Hot tip: use the freeze action if you want to force the player to choose before moving on.",
                 "reply clear",
                 "    Clears all current replies from being visible and useable (this includes silent replies)",
-            };
+            }; } }
 
-            public override string name => "reply";
+            public override string name { get { return "reply"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.DoReply(true);
             }
         }
         public class ReplySilent : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "",
                 "    Identical to reply, with two exceptions:",
                 "        Does not notify the player that they should choose a response",
                 "        Does not remind the player to choose a response if they chat while silent replies are active.",
                 "replysilent clear",
                 "    Clears all current replies from being visible and useable (this includes non-silent replies)",
-            };
+            }; } }
 
-            public override string name => "replysilent";
+            public override string name { get { return "replysilent"; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.DoReply(false);
@@ -3214,11 +3215,11 @@ namespace PluginCCS {
         }
 
         public abstract class CommandShortcut : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[args]",
                 "    Shortcut for \"cmd " + name + " [args]\". See /help " + name + " for more info.",
                 "    Has faster performance than calling the command with the cmd Action.",
-            };
+            }; } }
 
             public override void Behavior(ScriptRunner run) {
                 run.DoCmdNoPermChecks(cmd, run.args);
@@ -3227,34 +3228,34 @@ namespace PluginCCS {
             protected abstract Command cmd { get; }
         }
         public class TempBlock : CommandShortcut {
-            public override string name => "tempblock";
+            public override string name { get { return "tempblock"; } }
 
-            protected override Command cmd => Core.tempBlockCmd;
+            protected override Command cmd { get { return Core.tempBlockCmd; } }
         }
         public class TempChunk : CommandShortcut {
-            public override string name => "tempchunk";
+            public override string name { get { return "tempchunk"; } }
 
-            protected override Command cmd => Core.tempChunkCmd;
+            protected override Command cmd { get { return Core.tempChunkCmd; } }
         }
         public class Boost : CommandShortcut {
-            public override string name => "boost";
+            public override string name { get { return "boost"; } }
 
-            protected override Command cmd => Core.boostCmd;
+            protected override Command cmd { get { return Core.boostCmd; } }
         }
         public class Effect : CommandShortcut {
-            public override string name => "effect";
+            public override string name { get { return "effect"; } }
 
-            protected override Command cmd => Core.effectCmd;
+            protected override Command cmd { get { return Core.effectCmd; } }
         }
 
         public class Reach : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[distance]",
                 "    Temporarily sets the player's reach distance, in blocks.",
                 "    A change in MOTD will reset this. For example, switching maps, switching zones, being frozen or unfrozen.",
-            };
+            }; } }
 
-            public override string name => "reach";
+            public override string name { get { return "reach"; } }
 
             public override void Behavior(ScriptRunner run) {
                 double dist = 0;
@@ -3268,15 +3269,15 @@ namespace PluginCCS {
         }
 
         public class SetBlockID : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [block coordinates]",
                 "    Sets the value of [package] to the ID of the block at the given [block coordinates]",
                 "    IMPORTANT: this action does *not* see blocks that have been changed with tempblock or tempchunk!",
                 "    It only gets the ID of the block that was there in the original map.",
                 "    The ID of the block retrieved is the same as the ID of the block *clientside*, meaning something like hot_lava will be read as \"11\" from setblockid.",
-            };
+            }; } }
 
-            public override string name => "setblockid";
+            public override string name { get { return "setblockid"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces(4);
@@ -3297,7 +3298,7 @@ namespace PluginCCS {
         }
 
         public class DefineHotkey : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[input args]|[key name]|<list of space separated modifiers>",
                 "    This feature allows the player to run the #input label by pressing a key.",
                 "    [input args] will be sent as an automatic command /input [input args]",
@@ -3314,9 +3315,9 @@ namespace PluginCCS {
                 "    See \"special labels section\" for more information on how the special label #input works.",
                 "    IMPORTANT: for technical reasons, underscore will always be converted to space in the hotkey args,",
                 "               so you cannot rely on checking for underscores in the runArgs it sends to #input because they will be spaces.",
-            };
+            }; } }
 
-            public override string name => "definehotkey";
+            public override string name { get { return "definehotkey"; } }
 
             public override void Behavior(ScriptRunner run) {
                 // definehotkey [input args]|[key name]|<list of space separated modifiers>
@@ -3344,7 +3345,7 @@ namespace PluginCCS {
             }
         }
         public class UndefineHotkey : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[key name]|<list of space separated modifiers> ",
                 "    This Action compliments definehotkey by allowing you to remove hotkeys.",
                 "    Note that you must include matching modifiers to undefine a hotkey that has those modifiers.",
@@ -3353,9 +3354,9 @@ namespace PluginCCS {
                 "        undefinehotkey L|shift",
                 "        If you have L and L with shift defined, you must also undefine L and L with shift to remove everything from the L key.",
                 "    As a final note, all defined hotkeys are removed when the player switches maps, so undefining is not required if you want them to stay for the duration of the map.",
-            };
+            }; } }
 
-            public override string name => "undefinehotkey";
+            public override string name { get { return "undefinehotkey"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.Split(ScriptRunner.pipeChar);
@@ -3372,14 +3373,14 @@ namespace PluginCCS {
         }
 
         public class PlaceBlock : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[block] [block coordinates]",
                 "    Used to place blocks in the map.",
                 "    Unlike tempblock, these are permanently placed just like editing the map for real, so caution should be taken when using this Action.",
                 "    ANYONE who runs the script in your map can potentially place blocks if the script runs this Action.",
-            };
+            }; } }
 
-            public override string name => "placeblock";
+            public override string name { get { return "placeblock"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
@@ -3413,14 +3414,14 @@ namespace PluginCCS {
         }
 
         public class ChangeModel : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "<model>",
                 "    This Action allows you to temporarily change what model people have for the current world.",
                 "    Run this Action with no arguments to set the player's model back to what it was before.",
                 "    This Action only works if the MOTD of the level has one or more models forced with model=[something]",
-            };
+            }; } }
 
-            public override string name => "changemodel";
+            public override string name { get { return "changemodel"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName == "") {
@@ -3462,13 +3463,12 @@ namespace PluginCCS {
         }
 
         public class Award : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[award]",
                 "    Gives the player [award]",
-                "    This Action is not available in OS scripts",
-            };
+            }; } }
 
-            public override string name => "award";
+            public override string name { get { return "award"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (!run.perms.canGiveAwards) { run.p.Message("&WThe award action is not available in OS scripts."); return; }
@@ -3477,7 +3477,7 @@ namespace PluginCCS {
         }
 
         public class SetSplit : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] <splitter>",
                 "    Copies the contents of [package], then splits them up into a new set of packages such that",
                 "-       set myPackage Hey",
@@ -3495,9 +3495,9 @@ namespace PluginCCS {
                 "        mySentence[0] = Good",
                 "        mySentence[1] = morning!",
                 "        mySentence.Length = 2",
-            };
+            }; } }
 
-            public override string name => "setsplit";
+            public override string name { get { return "setsplit"; } }
 
             protected void _Behavior(ScriptRunner run, bool setArray) {
                 if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
@@ -3534,14 +3534,14 @@ namespace PluginCCS {
             }
         }
         public class SetLength : SetSplit {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] <splitter>",
                 "    Like setsplit, but just inserts the resulting length into [package].Length",
                 "    This is useful if you want to get the length of a string without wasting the memory",
                 "    and performance incurred by setsplit",
-            };
+            }; } }
 
-            public override string name => "setlength";
+            public override string name { get { return "setlength"; } }
 
             public override void Behavior(ScriptRunner run) {
                 _Behavior(run, false);
@@ -3549,13 +3549,13 @@ namespace PluginCCS {
         }
 
         public class SetDirVector : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[xPackage] [yPackage] [zPackage] [yaw number or package] [pitch number or package]",
                 "    Sets the value of x y and z packges to a 3D direction vector based on yaw and pitch in degrees.",
                 "    You can use this to get a direction (e.g. for /boost) based on where the player is looking if you use playerYaw and playerPitch packages as yaw and pitch.",
-            };
+            }; } }
 
-            public override string name => "setdirvector";
+            public override string name { get { return "setdirvector"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] argBits = run.args.SplitSpaces();
@@ -3587,13 +3587,13 @@ namespace PluginCCS {
         }
 
         public abstract class Event : ScriptAction {
-            public override string[] documentation => throw new MemberAccessException();
+            public override string[] documentation { get { throw new MemberAccessException(); } }
 
-            public override string name => throw new MemberAccessException();
+            public override string name { get { throw new MemberAccessException(); } }
 
             protected abstract SevGroup GetSevGroup(ScriptRunner run);
             public abstract bool asyncAllowed { get; }
-            public virtual bool osAllowed => true;
+            public virtual bool osAllowed { get { return true; } }
             public override void Behavior(ScriptRunner run) {
                 if (!osAllowed && !run.perms.staffPermission) {
                     run.Error("Action {0} is not allowed in os scripts", name);
@@ -3644,7 +3644,7 @@ namespace PluginCCS {
             }
         }
         public class ClickEvent : Event {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[async or sync] register [#label]",
                 "    Registers a label that will be called whenever the player clicks.",
                 "    async means the label can be ran again before the previous event is finished running.",
@@ -3653,14 +3653,14 @@ namespace PluginCCS {
                 "    To get information about the player click, see the Click Label section.",
                 "clickevent [async or sync] unregister",
                 "    Unregisteres the previously registered [label] for async or sync.",
-            };
+            }; } }
 
-            public override string name => "clickevent";
+            public override string name { get { return "clickevent"; } }
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.clickEvents; }
-            public override bool asyncAllowed => true;
+            public override bool asyncAllowed { get { return true; } }
         }
         public class ChatEvent : Event {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "sync register [#cancelLogic] [#onChat] [phrase]|<phrase2>|<etc>",
                 "    This Action is not allowed in os scripts.",
                 "    Registers two labels that will be called whenever the player chats.",
@@ -3674,13 +3674,13 @@ namespace PluginCCS {
                 "    For example, passing phrases foo|bar will give runArg2 for how much the message matches foo and runArg3 for matches bar.",
                 "chatevent sync unregister",
                 "    Unregisters the previously registered chat event.",
-            };
+            }; } }
 
-            public override string name => "chatevent";
+            public override string name { get { return "chatevent"; } }
 
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.chatEvents; }
-            public override bool asyncAllowed => false;
-            public override bool osAllowed => false;
+            public override bool asyncAllowed { get { return false; } }
+            public override bool osAllowed { get { return false; } }
             protected override bool ParseArg(ScriptRunner run, string stringArg, ref object arg) {
                 try {
                     arg = new ChatEventArgs(stringArg);
@@ -3703,7 +3703,7 @@ namespace PluginCCS {
             }
         }
         public class Error : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[message]",
                 "    Force the script to error with [message] as the reason.",
                 "    This is intended to be called if data or args haven't been setup correctly",
@@ -3711,9 +3711,9 @@ namespace PluginCCS {
                 "    This is more useful than a simple msg because errors provide trace information that",
                 "    can help you debug where the issue came from.",
                 "    Note that this will also terminate the script.",
-            };
+            }; } }
 
-            public override string name => "error";
+            public override string name { get { return "error"; } }
 
             public override void Behavior(ScriptRunner run) {
                 if (run.args.Length == 0) {
@@ -3725,7 +3725,7 @@ namespace PluginCCS {
         }
 
         public class Gui : ScriptAction {
-            public override string[] documentation => new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[option] [value]",
                 "    Change properties of the player's gui to achieve cinematic effects.",
                 "    Valid properties are:",
@@ -3739,13 +3739,13 @@ namespace PluginCCS {
                 "   0 means completely transparent and 1 means solid.",
                 "gui reset",
                 "    Resets the player's gui to default.",
-            };
+            }; } }
 
             public static void ResetFor(Player p) {
                 p.CinematicGui = new CinematicGui();
                 p.Session.SendCinematicGui(p.CinematicGui);
             }
-            public override string name => "gui";
+            public override string name { get { return "gui"; } }
 
             public override void Behavior(ScriptRunner run) {
                 switch (run.cmdName.ToLower()) {
@@ -3830,13 +3830,13 @@ namespace PluginCCS {
         }
 
         public class MBCoords : ReadOnlyPackage {
-            public override string desc => "The space-separated x y z coordinates of the message block that the script is ran from.";
+            public override string desc { get { return "The space-separated x y z coordinates of the message block that the script is ran from."; } }
             public override string Getter(ScriptRunner run) {
                 return run.cmdData.MBCoords.X + " " + run.cmdData.MBCoords.Y + " " + run.cmdData.MBCoords.Z;
             }
         }
         public class MBX : ReadOnlyPackage {
-            public override string desc => "The x y and z coordinates of the message block that the script ran from.";
+            public override string desc { get { return "The x y and z coordinates of the message block that the script ran from."; } }
             public override string Getter(ScriptRunner run) {
                 return run.cmdData.MBCoords.X.ToString();
             }
@@ -3854,14 +3854,14 @@ namespace PluginCCS {
 
 
         public class PlayerCoords : ReadOnlyPackage {
-            public override string desc => "The space-separated block coordinates of the player.";
+            public override string desc { get { return "The space-separated block coordinates of the player."; } }
             public override string Getter(ScriptRunner run) {
                 Vec3S32 pos = run.p.Pos.FeetBlockCoords;
                 return pos.X + " " + pos.Y + " " + pos.Z;
             }
         }
         public class PlayerX : ReadOnlyPackage {
-            public override string desc => "The x y and z block coordinates of the player.";
+            public override string desc { get { return "The x y and z block coordinates of the player."; } }
             public override string Getter(ScriptRunner run) {
                 return run.p.Pos.FeetBlockCoords.X.ToString();
             }
@@ -3877,13 +3877,13 @@ namespace PluginCCS {
             }
         }
         public class PlayerCoordsPrecise : ReadOnlyPackage {
-            public override string desc => "The space-separated precise block coordinates of the player (32 per-block, for /tp -precise).";
+            public override string desc { get { return "The space-separated precise block coordinates of the player (32 per-block, for /tp -precise)."; } }
             public override string Getter(ScriptRunner run) {
                 return run.p.Pos.X + " " + (run.p.Pos.Y - Entities.CharacterHeight) + " " + run.p.Pos.Z;
             }
         }
         public class PlayerPX : ReadOnlyPackage {
-            public override string desc => "The precise x y and z coordinates of the player (32 per-block, for /tp -precise).";
+            public override string desc { get { return "The precise x y and z coordinates of the player (32 per-block, for /tp -precise)."; } }
             public override string Getter(ScriptRunner run) {
                 return run.p.Pos.X.ToString();
             }
@@ -3899,7 +3899,7 @@ namespace PluginCCS {
             }
         }
         public class PlayerCoordsDecimal : ReadOnlyPackage {
-            public override string desc => "The space-separated block coordinates of the player (decimal numbers, like used in /tempbot add).";
+            public override string desc { get { return "The space-separated block coordinates of the player (decimal numbers, like used in /tempbot add)."; } }
             public override string Getter(ScriptRunner run) {
                 double X = (run.p.Pos.X / 32f) - 0.5f;
                 double Y = ((run.p.Pos.Y - Entities.CharacterHeight) / 32f);
@@ -3908,19 +3908,19 @@ namespace PluginCCS {
             }
         }
         public class PlayerYaw : ReadOnlyPackage {
-            public override string desc => "The player's camera yaw (left and right) in degrees.";
+            public override string desc { get { return "The player's camera yaw (left and right) in degrees."; } }
             public override string Getter(ScriptRunner run) {
                 return Orientation.PackedToDegrees(run.p.Rot.RotY).ToString();
             }
         }
         public class PlayerPitch : ReadOnlyPackage {
-            public override string desc => "The player's camera pitch (up and down) in degrees.";
+            public override string desc { get { return "The player's camera pitch (up and down) in degrees."; } }
             public override string Getter(ScriptRunner run) {
                 return Orientation.PackedToDegrees(run.p.Rot.HeadX).ToString();
             }
         }
         public class PlayerPronouns : ReadOnlyPackage {
-            public override string desc => "The name of the pronouns the player selected with /pronouns (default, they/them, etc).";
+            public override string desc { get { return "The name of the pronouns the player selected with /pronouns (default, they/them, etc)."; } }
             public override string Getter(ScriptRunner run) {
                 return run.p.pronouns.Name;
             }
@@ -3928,7 +3928,7 @@ namespace PluginCCS {
 
 
         public class msgDelay : ReadOnlyPackage {
-            public override string desc => "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had.";
+            public override string desc { get { return "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had."; } }
             public override string Getter(ScriptRunner run) {
                 double msgDelayMultiplier = 0;
                 NumberParser.TryParseDouble(run.GetString("msgDelayMultiplier"), out msgDelayMultiplier);
@@ -3936,26 +3936,26 @@ namespace PluginCCS {
             }
         }
         public class epochMS : ReadOnlyPackage {
-            public override string desc => "The number of milliseconds that have passed since 1970-01-01";
+            public override string desc { get { return "The number of milliseconds that have passed since 1970-01-01"; } }
             public override string Getter(ScriptRunner run) {
                 return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
             }
         }
 
         public class cef : ReadOnlyPackage {
-            public override string desc => "Has a value of \"true\" if the player has cef installed (https://github.com/SpiralP/classicube-cef-loader-plugin)";
+            public override string desc { get { return "Has a value of \"true\" if the player has cef installed (https://github.com/SpiralP/classicube-cef-loader-plugin)"; } }
             public override string Getter(ScriptRunner run) {
                 return run.hasCef ? "true" : "";
             }
         }
         public class webclient : ReadOnlyPackage {
-            public override string desc => "Has a value of \"true\" if the player is playing on the web client.";
+            public override string desc { get { return "Has a value of \"true\" if the player is playing on the web client."; } }
             public override string Getter(ScriptRunner run) {
                 return run.hasWebclient ? "true" : "";
             }
         }
         public class mobile : ReadOnlyPackage {
-            public override string desc => "Has a value of \"true\" if the player is playing on a mobile device.";
+            public override string desc { get { return "Has a value of \"true\" if the player is playing on a mobile device."; } }
             public override string Getter(ScriptRunner run) {
                 return run.hasMobile ? "true" : "";
             }
@@ -4047,7 +4047,7 @@ namespace PluginCCS {
             }
         }
         public class ActionSection : Section {
-            public override string Name => "Action";
+            public override string Name { get { return "Action"; } }
 
             public override List<string> Body() {
                 List<string> body = new List<string>();
@@ -4066,7 +4066,7 @@ namespace PluginCCS {
             }
         }
         public class IfSection : Section {
-            public override string Name => "If Statement";
+            public override string Name { get { return "If Statement"; } }
 
             static string[] body = new string[] {
                 "if [package] [Action]",
@@ -4109,7 +4109,7 @@ namespace PluginCCS {
             }
         }
         public class ReadOnlySection : Section {
-            public override string Name => "Preset packages";
+            public override string Name { get { return "Preset packages"; } }
 
             static string[] runArgDocs = new string[] {
                 "The arguments that are passed along with the #label when the script is run.",
@@ -4152,7 +4152,7 @@ namespace PluginCCS {
             }
         }
         public class LabelSection : Section {
-            public override string Name => "Special Labels";
+            public override string Name { get { return "Special Labels"; } }
 
             static string[] body = new string[] {
                 "#input",
@@ -4177,7 +4177,7 @@ namespace PluginCCS {
             }
         }
         public class ClickSection : Section {
-            public override string Name => "Click Label";
+            public override string Name { get { return "Click Label"; } }
 
             static string[] body = new string[] {
                 "When a script is ran from clickevent,",
@@ -4199,7 +4199,7 @@ namespace PluginCCS {
             }
         }
         public class NotesSection : Section {
-            public override string Name => "Important Notes";
+            public override string Name { get { return "Important Notes"; } }
 
             static string[] body = new string[] {
                 "All Action names are case sensitive.",
@@ -4217,7 +4217,7 @@ namespace PluginCCS {
             }
         }
         public class TopLevelStatementsSection : Section {
-            public override string Name => "Top Level Statements";
+            public override string Name { get { return "Top Level Statements"; } }
 
             static string[] body = new string[] {
                 "Top level statements are like option toggles for the entire script.",
@@ -4254,7 +4254,7 @@ namespace PluginCCS {
             }
         }
         public class StaffSection : Section {
-            public override string Name => "Staff (non OS)";
+            public override string Name { get { return "Staff (non OS)"; } }
 
             static string[] body = new string[] {
                 "For a package to be \"saved\", its name should end with a period. For example, imagine we wanted to save how many eggs were collected in egg2022.",
@@ -4334,7 +4334,7 @@ namespace PluginCCS {
         public Sevent sync;
         public SevGroup() { }
 
-        public bool active => async != null || sync != null;
+        public bool active { get { return async != null || sync != null; } }
         public void Register(Sevent sevent, bool isAsync) {
             if (isAsync) { async = sevent; } else { sync = sevent; }
         }
@@ -5115,7 +5115,7 @@ namespace PluginCCS {
         Hotkeys hotkeys;
         //Not thread safe. LOL!
         List<BindPair> binds = new List<BindPair>();
-        public int bindsCount => binds.Count;
+        public int bindsCount { get { return binds.Count; } }
         public Keybinds(Player p, Hotkeys hotkeys) {
             this.p = p;
             this.hotkeys = hotkeys;
