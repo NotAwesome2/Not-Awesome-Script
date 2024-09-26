@@ -2233,6 +2233,7 @@ namespace PluginCCS {
         string ReplaceAts(string message) {
             if (message.IndexOf('@') == -1) { return message; }
             message = message.Replace("@p", p.name);
+            message = message.Replace("@truename", p.truename);
             message = message.Replace("@nick", NameUtils.MakeNatural(p.DisplayName));
             message = message.Replace("@color", p.color);
             return message;
@@ -2859,6 +2860,81 @@ namespace PluginCCS {
 
             protected override double Op(double value) {
                 return Math.Floor(value);
+            }
+        }
+
+        public class SetFromHexColor : ScriptAction {
+            public override string[] documentation { get { return new string[] {
+                "[package] [hexColor]",
+                "    Converts [hexColor] into integer red, green, and blue components such that:",
+                "-       setfromhexcolor myColor FF00FF",
+                "    gives you the color structure:",
+                "        myColor[0] = 255",
+                "        myColor[1] = 0",
+                "        myColor[2] = 255",
+                "        myColor.Length = 3",
+                "    Indices 0 1 2 correspond to Red Green and Blue respectively.",
+            }; } }
+
+            public override string name { get { return "setfromhexcolor"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                string package = run.cmdName;
+                string hexCode = run.cmdArgs;
+
+                ColorDesc c;
+                if (!Colors.TryParseHex(hexCode, out c)) { run.Error("setfromhexcolor: \"{0}\" is not a valid hex color.", hexCode); return; }
+
+                run.SetDouble(package + "[0]", c.R);
+                run.SetDouble(package + "[1]", c.G);
+                run.SetDouble(package + "[2]", c.B);
+                run.SetDouble(package + ".Length", 3);
+            }
+
+            //Unused but didn't want to throw away the code
+            void AverageColors(ScriptRunner run) {
+                string package = run.cmdName;
+                string[] colors = run.cmdArgs.SplitSpaces();
+
+                List<Vec3F32> vecColors = new List<Vec3F32>(colors.Length);
+                Vec3F32 average = new Vec3F32();
+                foreach (string color in colors) {
+                    ColorDesc c;
+                    if (!Colors.TryParseHex(color, out c)) { run.Error("SetAverageColor: \"{0}\" is not a valid hex color.", color); return; }
+                    average += new Vec3F32(c.R / (float)Byte.MaxValue, c.G / (float)Byte.MaxValue, c.B / (float)Byte.MaxValue);
+                }
+                //No / operator?
+                average = new Vec3F32(average.X / colors.Length, average.Y / colors.Length, average.Z / colors.Length);
+                //Utils.Hex
+
+                run.SetString(package, Utils.Hex((byte)(average.X * 255), (byte)(average.Y * 255), (byte)(average.Z * 255)));
+
+            }
+        }
+        public class SetToHexColor : ScriptAction {
+            public override string[] documentation { get { return new string[] {
+                "[package] [colorStructure]",
+                "    Calculates the hex code based on the given [colorStructure] and inserts it into [package].",
+                "    [colorStructure] represents a group of packages that are unified with a given prefix.",
+                "    For example, if you run",
+                "-       settohexcolor hexCode myColor",
+                "    Then it is expected that you have 3 different packages like:",
+                "        myColor[0] = 255",
+                "        myColor[1] = 0",
+                "        myColor[2] = 255",
+                "    Indices 0 1 2 correspond to Red Green and Blue respectively.",
+                "    hexCode will be set to FF00FF"
+            }; } }
+            public override string name { get { return "settohexcolor"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                string package = run.cmdName;
+                string structure = run.cmdArgs;
+                int r, g, b;
+                run.GetInt(structure + "[0]", out r);
+                run.GetInt(structure + "[1]", out g);
+                run.GetInt(structure + "[2]", out b);
+                run.SetString(package, Utils.Hex((byte)r, (byte)g, (byte)b));
             }
         }
 
