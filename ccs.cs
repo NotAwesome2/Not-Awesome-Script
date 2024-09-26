@@ -2937,7 +2937,7 @@ namespace PluginCCS {
                 r = Math.Clamp(r, 0, byte.MaxValue);
                 g = Math.Clamp(g, 0, byte.MaxValue);
                 b = Math.Clamp(b, 0, byte.MaxValue);
-                run.SetString(package, Utils.Hex((byte)r, (byte)g, (byte)b));
+                run.SetString(package, Utils.Hex((byte)r, (byte)g, (byte)b).TrimStart('#'));
             }
         }
 
