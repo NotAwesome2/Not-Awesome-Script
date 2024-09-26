@@ -2934,6 +2934,9 @@ namespace PluginCCS {
                 run.GetInt(structure + "[0]", out r);
                 run.GetInt(structure + "[1]", out g);
                 run.GetInt(structure + "[2]", out b);
+                r = Math.Clamp(r, 0, byte.MaxValue);
+                g = Math.Clamp(g, 0, byte.MaxValue);
+                b = Math.Clamp(b, 0, byte.MaxValue);
                 run.SetString(package, Utils.Hex((byte)r, (byte)g, (byte)b));
             }
         }
