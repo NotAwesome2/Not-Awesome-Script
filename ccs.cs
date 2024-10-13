@@ -131,6 +131,10 @@ namespace PluginCCS {
                     if (!CommandParser.GetBool(p, words[4], ref Public)) {
                         throw new ArgumentException(String.Format("Could not parse arg \"{0}\" as true or false for public tempblock", words[4]));
                     }
+                    if (data.Context != CommandContext.MessageBlock && Public) {
+                        p.Message("%cYou can't send the tempblock to all players unless the command comes from a message block.");
+                        return;
+                    }
                 }
             }
 
