@@ -2925,19 +2925,19 @@ namespace PluginCCS {
                 "    Then it is expected that you have 3 different packages like:",
                 "        myColor[0] = 255",
                 "        myColor[1] = 0",
-                "        myColor[2] = 255",
+                "        myColor[2] = 250.3",
                 "    Indices 0 1 2 correspond to Red Green and Blue respectively.",
-                "    hexCode will be set to FF00FF"
+                "    hexCode will be set to FF00FA"
             }; } }
             public override string name { get { return "settohexcolor"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string package = run.cmdName;
                 string structure = run.cmdArgs;
-                int r, g, b;
-                run.GetInt(structure + "[0]", out r);
-                run.GetInt(structure + "[1]", out g);
-                run.GetInt(structure + "[2]", out b);
+                double r, g, b;
+                run.GetDouble(structure + "[0]", out r);
+                run.GetDouble(structure + "[1]", out g);
+                run.GetDouble(structure + "[2]", out b);
                 r = Math.Clamp(r, 0, byte.MaxValue);
                 g = Math.Clamp(g, 0, byte.MaxValue);
                 b = Math.Clamp(b, 0, byte.MaxValue);
