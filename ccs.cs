@@ -1989,7 +1989,7 @@ namespace PluginCCS {
                     //if the last action was Reply and this action isn't, that means we're done setting up replies for now and should show the text of how to reply.
                     if (
                         lastLine.actionType != null &&
-                        lastLine.GetType() == typeof(ScriptActions.Reply) &&
+                        lastLine.actionType.GetType() == typeof(ScriptActions.Reply) &&
                         script.actions[actionIndex].actionType.GetType() != typeof(ScriptActions.Reply)
 
                         ) {
