@@ -4284,6 +4284,15 @@ namespace PluginCCS {
                 "    If that script exists and has the label #accessControl, that label will be ran.",
                 "    If the package \"denyAccess\" is set to \"true\" when the script quits, then the player will be denied access to the map.",
                 "    It's important to note that this runs /before/ player joins the map, so it cannot act as a spawn MB that initializes temporary packages or whatnot, since joining a map resets packages.",
+                "",
+                "#onJoin",
+                "    This only works for staff scripts.",
+                "    Once the player joins a map this label will be run automatically.",
+                "",
+                "#onExit",
+                "    This only works for staff scripts.",
+                "    When the player leaves a map, this label will be run automatically.",
+                "    It will also run if the player disconnects from the server while on a map utilising it.",            
             };
 
             public override List<string> Body() {
