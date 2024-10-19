@@ -1663,7 +1663,7 @@ namespace PluginCCS {
         bool _cancelled;
         public bool cancelled {
             get { return _cancelled || startingLevelName != p.level.name.ToLower(); 
-                if (startLabel != "#onExit") { return _cancelled; }
+                if (p.Socket.Disconnected && startLabel != "#onExit") { return _cancelled; }
             }
             set {
                 if (value != true) { throw new System.ArgumentException("cancelled can only be set to true"); }
