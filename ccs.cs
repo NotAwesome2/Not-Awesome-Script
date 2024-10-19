@@ -703,6 +703,7 @@ namespace PluginCCS {
 
             OnPlayerFinishConnectingEvent.Register(OnPlayerFinishConnecting, Priority.High);
             OnInfoSwapEvent.Register(OnInfoSwap, Priority.Low);
+            OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
             OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
             OnPlayerSpawningEvent.Register(OnPlayerSpawning, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
@@ -741,6 +742,7 @@ namespace PluginCCS {
 
             OnPlayerFinishConnectingEvent.Unregister(OnPlayerFinishConnecting);
             OnInfoSwapEvent.Unregister(OnInfoSwap);
+            OnJoinedLevelEvent.Unregister(OnJoinedLevel);
             OnJoiningLevelEvent.Unregister(OnJoiningLevel);
             OnPlayerSpawningEvent.Unregister(OnPlayerSpawning);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
@@ -778,6 +780,8 @@ namespace PluginCCS {
                 Logger.Log(LogType.SystemActivity, "ccs is not clearing scriptdata due to player reconnecting: " + p.name);
                 return;
             }
+            CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
+            ScriptRunner.PerformScript(p, p.level.name, "#onExit", RunnerPerms.Staff, false, data2);
 
             SavePlayerData(p);
             scriptDataAtPlayer.Remove(p.name);
@@ -787,6 +791,9 @@ namespace PluginCCS {
             if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) { return; }
             data.WriteSavedStringsToDisk();
             data.hotkeys.keybinds.SaveBinds();
+        }
+        static void OnJoinedLevel(Player p, Level prevLevel, Level lvl, ref bool announce) {
+            Script.OnJoinedLevel(p, prevLevel, lvl, ref announce);
         }
         static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             Script.OnJoiningLevel(p, lvl, ref canJoin);
@@ -1365,6 +1372,22 @@ namespace PluginCCS {
             }
         }
 
+        public static void OnJoinedLevel(Player p, Level prevLevel, Level lvl, ref bool announce) {
+
+            if (prevLevel == null) { return; } //Handles null exception when player joins servers
+            string prevFilepath = PATH + prevLevel.name + EXT;
+            if (File.Exists(prevFilepath)) { 
+                CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
+                ScriptRunner.PerformScript(p, prevLevel.name, "#onExit", RunnerPerms.Staff, false, data2);
+            }
+
+            string filepath = PATH + lvl.name + EXT;
+            if (!File.Exists(filepath)) { return; }
+
+            CommandData data3 = default(CommandData); data3.Context = CommandContext.MessageBlock;
+            ScriptRunner.PerformScript(p, lvl.name, "#onJoin", RunnerPerms.Staff, false, data3);
+        }
+
         public static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             string filePath = PATH + lvl.name + EXT;
             if (!File.Exists(filePath)) { return; }
@@ -1639,7 +1662,9 @@ namespace PluginCCS {
 
         bool _cancelled;
         public bool cancelled {
-            get { return _cancelled || startingLevelName != p.level.name.ToLower() || p.Socket.Disconnected; }
+            get { return _cancelled || startingLevelName != p.level.name.ToLower(); 
+                if (startLabel != "#onExit") { return _cancelled; }
+            }
             set {
                 if (value != true) { throw new System.ArgumentException("cancelled can only be set to true"); }
                 _cancelled = value;
@@ -1943,6 +1968,12 @@ namespace PluginCCS {
                     return;
                 }
                 if (startLabel == "#accessControl") {
+                    return;
+                }
+                if (startLabel == "#onExit") { 
+                    return; 
+                }
+                if (startLabel == "#onJoin") {
                     return;
                 }
                 p.Message("&cScript error: unknown starting label \"" + startLabel + "\".");
