@@ -792,7 +792,7 @@ namespace PluginCCS {
             data.hotkeys.keybinds.SaveBinds();
         }
         /// <summary>
-        /// Runs before OnPlayerSpawning which resets script variables
+        /// Runs after OnPlayerSpawning which resets script variables
         /// </summary>
         public static void OnJoinedLevel(Player p, Level prevLevel, Level lvl, ref bool announce) {
             if (prevLevel == null) { return; }
@@ -4330,6 +4330,7 @@ namespace PluginCCS {
                 "#onExit",
                 "    This only works for staff scripts.",
                 "    When the player leaves a map, this label will be run automatically.",
+                "    It will run while the player is in the new map, after packages are reset.",
                 "    It will also run if the player disconnects from the server while on a map utilising it.",            
             };
 
