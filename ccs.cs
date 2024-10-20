@@ -703,6 +703,7 @@ namespace PluginCCS {
 
             OnPlayerFinishConnectingEvent.Register(OnPlayerFinishConnecting, Priority.High);
             OnInfoSwapEvent.Register(OnInfoSwap, Priority.Low);
+            OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
             OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
             OnPlayerSpawningEvent.Register(OnPlayerSpawning, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
@@ -741,6 +742,7 @@ namespace PluginCCS {
 
             OnPlayerFinishConnectingEvent.Unregister(OnPlayerFinishConnecting);
             OnInfoSwapEvent.Unregister(OnInfoSwap);
+            OnJoinedLevelEvent.Unregister(OnJoinedLevel);
             OnJoiningLevelEvent.Unregister(OnJoiningLevel);
             OnPlayerSpawningEvent.Unregister(OnPlayerSpawning);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
@@ -778,7 +780,8 @@ namespace PluginCCS {
                 Logger.Log(LogType.SystemActivity, "ccs is not clearing scriptdata due to player reconnecting: " + p.name);
                 return;
             }
-
+            CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
+            ScriptRunner.PerformScript(p, p.level.name, ScriptRunner.LABEL_ON_EXIT, RunnerPerms.Staff, false, data2);
             SavePlayerData(p);
             scriptDataAtPlayer.Remove(p.name);
         }
@@ -787,6 +790,9 @@ namespace PluginCCS {
             if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) { return; }
             data.WriteSavedStringsToDisk();
             data.hotkeys.keybinds.SaveBinds();
+        }
+        static void OnJoinedLevel(Player p, Level prevLevel, Level lvl, ref bool announce) {
+            Script.OnJoinedLevel(p, prevLevel, lvl, ref announce);
         }
         static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             Script.OnJoiningLevel(p, lvl, ref canJoin);
@@ -1365,6 +1371,33 @@ namespace PluginCCS {
             }
         }
 
+        public static void OnJoinedLevel(Player p, Level prevLevel, Level lvl, ref bool announce) {
+            string filepath = PATH + lvl.name + EXT;
+            string scriptName = lvl.name;
+            bool staffPerm = true; 
+            if (IsOs(lvl)) { 
+                filepath = PATH_OS + lvl.name + EXT;
+                scriptName = OS_PREFIX + lvl.name;
+                staffPerm = false; 
+            }
+            //Adds support for #onJoin in os scripts, staffPerm ensuring that #onJoin run with the appropriately RunnerPerms
+            if (!File.Exists(filepath)) { return; }
+
+            CommandData data3 = default(CommandData); data3.Context = CommandContext.MessageBlock;
+            ScriptRunner.PerformScriptOnNewThread(p, scriptName, ScriptRunner.LABEL_ON_JOIN, new RunnerPerms(staffPerm, staffPerm, staffPerm, staffPerm) , false, data3); //Run on NewThread 
+            //Run on new thread to prevent "lagging" the player from script actions/delays.
+
+            if (prevLevel == null) { return; } 
+            //Handles null exception when player first joins server while allowing for the #onJoin label to run from main on first connect.
+
+            string prevFilepath = PATH + prevLevel.name + EXT;
+            if (File.Exists(prevFilepath)) { 
+                CommandData data2 = default(CommandData); data2.Context = CommandContext.MessageBlock;
+                ScriptRunner.PerformScriptOnNewThread(p, prevLevel.name, ScriptRunner.LABEL_ON_EXIT, RunnerPerms.Staff, false, data2);
+                
+            }
+        }
+
         public static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             string filePath = PATH + lvl.name + EXT;
             if (!File.Exists(filePath)) { return; }
@@ -1374,7 +1407,7 @@ namespace PluginCCS {
             ScriptData scriptData = Core.GetScriptData(p);
             scriptData.SetString("denyAccess", "", RunnerPerms.Staff, lvl.name);
 
-            ScriptRunner.PerformScript(p, lvl.name, "#accessControl", RunnerPerms.Staff, false, data2);
+            ScriptRunner.PerformScript(p, lvl.name, ScriptRunner.ACCESS_CONTROL, RunnerPerms.Staff, false, data2);
 
             if (scriptData.GetString("denyAccess", RunnerPerms.Staff, lvl.name).ToLower() == "true") {
                 canJoin = false;
@@ -1398,9 +1431,9 @@ namespace PluginCCS {
             string calledLabel;
             bool async;
             if (cmd.CaselessEq("input")) {
-                calledLabel = "#input"; async = false;
+                calledLabel = ScriptRunner.INPUT_LABEL; async = false;
             } else if (cmd.CaselessEq("inputAsync")) {
-                calledLabel = "#inputAsync"; async = true;
+                calledLabel = ScriptRunner.ASYNC_LABEL; async = true;
             } else { return; }
 
             string scriptCmdName;
@@ -1639,7 +1672,10 @@ namespace PluginCCS {
 
         bool _cancelled;
         public bool cancelled {
-            get { return _cancelled || startingLevelName != p.level.name.ToLower() || p.Socket.Disconnected; }
+            get {if (p.Socket.Disconnected && startLabel == ScriptRunner.LABEL_ON_EXIT) { return false; } 
+            //Prevents script from cancelling immediately if #onExit is running
+                return _cancelled || startingLevelName != p.level.name.ToLower(); 
+            }
             set {
                 if (value != true) { throw new System.ArgumentException("cancelled can only be set to true"); }
                 _cancelled = value;
@@ -1886,6 +1922,13 @@ namespace PluginCCS {
         /// Ensure that when two scripts are ran at exactly the same time that should lock each other out, a lockout actually occurs
         /// </summary>
         static readonly object thisBoolLocker = new object();
+        public const string LABEL_ON_EXIT = "#onExit";
+        public const string LABEL_ON_JOIN = "#onJoin";
+        public const string ACCESS_CONTROL = "#accessControl";
+        public const string INPUT_LABEL = "#input";
+        public const string ASYNC_LABEL = "#inputAsync";
+        static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, ACCESS_CONTROL };
+        List<string> silentUnknownLabels = new List<string>(silentLabels); 
         public static void PerformScript(Player p, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
             //pass in string arguments after label saparated by | characters
             string[] runArgs = startLabel.Split('|');
@@ -1938,13 +1981,8 @@ namespace PluginCCS {
                 return;
             }
             if (!script.GetLabel(startLabel, out actionIndex)) {
-                if (startLabel == "#input") {
-                    p.Message("%T/Input &Sis not used in {0}.", p.level.name);
-                    return;
-                }
-                if (startLabel == "#accessControl") {
-                    return;
-                }
+                if (silentUnknownLabels.Contains(startLabel)) { return; }
+                //Searches list of special labels to determine if 'unknown starting label' should be displayed or not.
                 p.Message("&cScript error: unknown starting label \"" + startLabel + "\".");
                 p.Message(CmdScript.labelHelp);
                 return;
@@ -4253,6 +4291,14 @@ namespace PluginCCS {
                 "    If that script exists and has the label #accessControl, that label will be ran.",
                 "    If the package \"denyAccess\" is set to \"true\" when the script quits, then the player will be denied access to the map.",
                 "    It's important to note that this runs /before/ player joins the map, so it cannot act as a spawn MB that initializes temporary packages or whatnot, since joining a map resets packages.",
+                "",
+                "#onJoin",
+                "    Once the player joins a map this label will be run automatically.",
+                "",
+                "#onExit",
+                "    This only works for staff scripts.",
+                "    When the player leaves a map, this label will be run automatically.",
+                "    It will also run if the player disconnects from the server while on a map utilising it.",            
             };
 
             public override List<string> Body() {
@@ -4565,9 +4611,12 @@ namespace PluginCCS {
         public void OnPlayerSpawning() {
 
             //p.Message("OnPlayerSpawning {0}", p.level.name);
+            //if (ScriptRunner.startLabel == ScriptRunner.LABEL_ON_JOIN) { return; }
 
             lock (activeScriptsLocker) {
                 for (int i = activeScripts.Count - 1; i >= 0; i--) {
+                    if (activeScripts[i].startLabel == ScriptRunner.LABEL_ON_JOIN) { continue; } 
+                    //Allows data initialised by #onJoin to persist after spawning.
                     activeScripts[i].cancelled = true;
                     activeScripts.Remove(activeScripts[i]);
                 }
