@@ -4293,7 +4293,6 @@ namespace PluginCCS {
                 "    It's important to note that this runs /before/ player joins the map, so it cannot act as a spawn MB that initializes temporary packages or whatnot, since joining a map resets packages.",
                 "",
                 "#onJoin",
-                "    This only works for staff scripts.",
                 "    Once the player joins a map this label will be run automatically.",
                 "",
                 "#onExit",
