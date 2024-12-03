@@ -1357,7 +1357,11 @@ namespace PluginCCS {
 
                 if (line[0] == '#') {
                     if (line.Contains('|')) { CompileError(p, scriptName, lineNumber, "Declaring labels with pipe character | is not allowed."); return false; }
-                    if (labels.ContainsKey(line)) { CompileError(p, scriptName, lineNumber, "Duplicate label \"" + line + "\" detected."); return false; }
+                    if (labels.ContainsKey(line)) {
+                        CompileError(p, scriptName, lineNumber,
+                        "Label \"" + line.EscapeCurlyBraces() + "\" appears more than once, but every label must be unique.");
+                        return false;
+                    }
                     labels[line] = actions.Count;
                     continue;
                 }
@@ -1367,7 +1371,7 @@ namespace PluginCCS {
                 string lineTrimmedCondition = line;
                 if (line.StartsWith("if")) {
                     Action LackingArgs = () => {
-                        CompileError(p, scriptName, lineNumber, "If statement \"" + line + "\" does not have enough arguments.");
+                        CompileError(p, scriptName, lineNumber, "If statement \"" + line.EscapeCurlyBraces() + "\" does not have enough arguments.");
                     };
 
                     string[] ifBits = line.SplitSpaces();
@@ -1380,7 +1384,7 @@ namespace PluginCCS {
                     } else if (logic == "if") {
                         scriptLine.conditionLogic = ScriptLine.ConditionLogic.If;
                     } else {
-                        CompileError(p, scriptName, lineNumber, "Logic \"" + logic + "\" is not recognized.");
+                        CompileError(p, scriptName, lineNumber, "Logic \"" + logic.EscapeCurlyBraces() + "\" is not recognized.");
                         return false;
                     }
 
@@ -1410,7 +1414,7 @@ namespace PluginCCS {
                 string actionType = lineTrimmedCondition.Split(new char[] { ' ' })[0];
                 scriptLine.actionType = ScriptActions.GetAction(actionType);
                 if (scriptLine.actionType == null) {
-                    CompileError(p, scriptName, lineNumber, "unknown Action \"" + actionType + "\" detected.");
+                    CompileError(p, scriptName, lineNumber, "There is no script Action named \"" + actionType.EscapeCurlyBraces() + "&c\".");
                     return false;
                 }
 
@@ -5609,6 +5613,15 @@ namespace PluginCCS {
             return double.TryParse(arg, doubleStyle, CultureInfo.InvariantCulture, out value);
         }
     }
+    public static class StringExtensions {
 
+        /// <summary>
+        /// Returns input with curly braces escaped such that they do not get formatted via string.Format.
+        /// </summary>
+        public static string EscapeCurlyBraces(this string input) {
+            return input.Replace("{", "{{").Replace("}", "}}");
+        }
+
+    }
 
 }
