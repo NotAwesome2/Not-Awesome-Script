@@ -496,7 +496,7 @@ namespace PluginCCS {
             //the script has to be ran as if from a message block
             CommandData cmdData = default(CommandData); cmdData.Context = CommandContext.MessageBlock;
 
-            ScriptRunner.PerformScript(p, replyData.scriptName, replyData.labelName, replyData.perms, false, cmdData);
+            ScriptRunner.PerformScript(p, p.level, replyData.scriptName, replyData.labelName, replyData.perms, false, cmdData);
         }
         public static void SetUpDone(Player p) {
             p.Message("&e(say a number to choose a response from the right →→)");
@@ -641,7 +641,7 @@ namespace PluginCCS {
         public static Command updateOsScriptCmd;
         public static Command downloadScriptCmd;
 
-        static Command[] cmds = new Command[] { new KeybindCommand(), new CmdDefineHotkey(), };
+        static Command[] cmds = new Command[] { new KeybindCommand(), new CmdDefineHotkey(), new CmdScriptAction(), new CmdOsScriptAction(), };
 
         static Command _boostCmd = null;
         public static Command boostCmd {
@@ -781,7 +781,7 @@ namespace PluginCCS {
                 return;
             }
 
-            ScriptRunner.PerformOnExit(p, p.level.name);
+            ScriptRunner.PerformOnExit(p, p.level);
             SavePlayerData(p);
             scriptDataAtPlayer.Remove(p.name);
         }
@@ -796,7 +796,7 @@ namespace PluginCCS {
         /// </summary>
         public static void OnJoinedLevel(Player p, Level prevLevel, Level lvl, ref bool announce) {
             if (prevLevel == null) { return; }
-            ScriptRunner.PerformOnExit(p, prevLevel.name);
+            ScriptRunner.PerformOnExit(p, prevLevel);
         }
         public static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
             if (ScriptRunner.PerformAccessControl(p, lvl.name)) {
@@ -882,13 +882,14 @@ namespace PluginCCS {
             scriptData.SetString("cancelchat", "", sevent.perms, sevent.scriptName);
 
             CommandData data = sevent.GetCommandData(p.Pos.FeetBlockCoords);
-            ScriptRunner.PerformScript(p, sevent.scriptName, cancelLogicLabelAndArgs, sevent.perms, false, data);
+            Level level = p.level; //Cache level so it doesn't change between labels
+            ScriptRunner.PerformScript(p, level, sevent.scriptName, cancelLogicLabelAndArgs, sevent.perms, false, data);
 
             if (scriptData.GetString("cancelchat", sevent.perms, sevent.scriptName).ToLower() == "true") {
                 p.cancelchat = true;
             }
 
-            ScriptRunner.PerformScriptOnNewThread(p, sevent.scriptName, onChatLabelAndArgs, sevent.perms, false, data);
+            ScriptRunner.PerformScriptOnNewThread(p, level, sevent.scriptName, onChatLabelAndArgs, sevent.perms, false, data);
         }
 
         static void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
@@ -923,7 +924,7 @@ namespace PluginCCS {
         }
         static void DoClick(Player p, Sevent sevent, Vec3S32 coords, ClickInfo clickInfo) {
             if (sevent == null) { return; }
-            ScriptRunner.PerformScriptOnNewThread(p, sevent.scriptName, sevent.scriptLabel, sevent.perms, sevent.async,
+            ScriptRunner.PerformScriptOnNewThread(p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, sevent.async,
                 sevent.GetCommandData(coords),
                 clickInfo);
         }
@@ -1024,7 +1025,7 @@ namespace PluginCCS {
 
             string startLabel = args[1 + argsOffset];
             bool repeatable = (args.Length > 2 + argsOffset && args[2 + argsOffset] == "repeatable");
-            ScriptRunner.PerformScript(p, scriptName, startLabel, RunnerPerms.Staff, repeatable, data);
+            ScriptRunner.PerformScript(p, p.level, scriptName, startLabel, RunnerPerms.Staff, repeatable, data);
         }
 
         public const string labelHelp = "%HLabels are case sensitive and must begin with #";
@@ -1052,17 +1053,21 @@ namespace PluginCCS {
         //osscript #tallyEggs|some|run|args repeatable
         public override void Use(Player p, string message, CommandData data) {
             if (!Script.OsAllowed(p)) { return; }
-            if (!(data.Context == CommandContext.MessageBlock || LevelInfo.IsRealmOwner(p.name, p.level.name) || p.group.Permission >= LevelPermission.Operator)) {
-                p.Message("You can only use %b/{0} %Sif it is in a message block or you are the map owner.", name);
+
+            //Cache level so that the player cannot switch levels after the permission check has ran but before the script itself runs
+            Level level = p.level;
+
+            if (!(data.Context == CommandContext.MessageBlock || LevelInfo.IsRealmOwner(p.name, level.name) || p.group.Permission >= LevelPermission.Operator)) {
+                p.Message("You can only use &T/{0} &Sif it is in a message block or you are the map owner.", name);
                 return;
             }
             if (message.Length == 0) { Help(p); return; }
             string[] args = message.SplitSpaces();
-            string scriptName = Script.OS_PREFIX + p.level.name;
+            string scriptName = Script.OS_PREFIX + level.name;
             string startLabel = args[0];
             bool repeatable = (args.Length > 1 && args[1] == "repeatable");
 
-            ScriptRunner.PerformScript(p, scriptName, startLabel, new RunnerPerms(p.level), repeatable, data);
+            ScriptRunner.PerformScript(p, level, scriptName, startLabel, new RunnerPerms(level), repeatable, data);
         }
 
         public override void Help(Player p) {
@@ -1071,6 +1076,64 @@ namespace PluginCCS {
             HelpBody(p);
         }
     }
+
+    public class CmdScriptAction : Command2 {
+        public override string name { get { return "ScriptAction"; } }
+        public override string shortcut { get { return "saction"; } }
+        public override bool MessageBlockRestricted { get { return true; } }
+        public override string type { get { return "other"; } }
+        public override bool museumUsable { get { return false; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Admin; } }
+        public override bool UpdatesLastCmd { get { return false; } }
+        public override bool LogUsage { get { return false; } }
+
+        protected virtual RunnerPerms GetPerms(Level level) { return RunnerPerms.Staff; }
+        protected virtual bool Allowed(Player p, Level level) {
+            return true;
+        }
+
+        public override void Use(Player p, string message, CommandData data) {
+            if (message.Length == 0) { Help(p); return; }
+
+            Level level = p.level; //Cache level so it can't change from another thread after permission is checked
+            if (!Allowed(p, level)) { return; }
+
+            const string Label = "#main";
+            try {
+                Script script = new Script(p, "TempScript", new string[] {
+                    Label,
+                    message,
+                    new ScriptActions.Quit().name,
+                });
+
+                ScriptRunner run = ScriptRunner.Create(p, level, script, GetPerms(level), data, false, "WhatAreWeDoingHere", new string[] { Label });
+                run.Run(Label, this);
+
+            } catch (ArgumentException) {
+
+            }
+        }
+        public override void Help(Player p) {
+            p.Message("&T/{0} <if statement> [action] <action args>", name);
+            p.Message("&HRuns a script action.");
+            p.Message("&HConvenience command if you just need to run a script action without writing a new script file.");
+        }
+    }
+    public class CmdOsScriptAction : CmdScriptAction {
+        public override string name { get { return "OsScriptAction"; } }
+        public override string shortcut { get { return "osa"; } }
+        public override LevelPermission defaultRank { get { return LevelPermission.Guest; } }
+
+        protected override RunnerPerms GetPerms(Level level) { return new RunnerPerms(level); }
+        protected override bool Allowed(Player p, Level level) {
+            if (!LevelInfo.IsRealmOwner(p.name, level.name)) {
+                p.Message("You may only run &T{0} &Sif you are the map owner.", name);
+                return false;
+            }
+            return true;
+        }
+    }
+
     public class CmdDebugScript : Command2 {
         public override string name { get { return "DebugScript"; } }
         public override string shortcut { get { return ""; } }
@@ -1442,9 +1505,20 @@ namespace PluginCCS {
 
         public static bool IsOs(Level level) { return level.name.Contains("+"); }
 
+        /// <summary>
+        /// Used to instantiate a new script in CompileScript
+        /// </summary>
         private Script(string name) {
             this.name = name;
             compileDate = DateTime.UtcNow;
+        }
+        /// <summary>
+        /// Simple Script constructor to initialise from code.
+        /// Exceptions: ArgumentException will be thrown if a compilation error occurs.
+        /// The error will be displayed to the player.
+        /// </summary>
+        public Script(Player p, string name, string[] contents) : this (name) {
+            if (!AddFile(p, this.name, contents)) throw new ArgumentException();
         }
         public readonly string name;
         private DateTime compileDate;
@@ -1515,17 +1589,28 @@ namespace PluginCCS {
 
         private ScriptRunner() { }
 
-        public static ScriptRunner Create(Player p, string scriptName, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, ClickInfo clickInfo = null) {
+        /// <summary>
+        /// Returns a new script runner to run on the given level, getting a script based on the given script name.
+        /// </summary>
+        public static ScriptRunner Create(Player p, Level level, string scriptName, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, ClickInfo clickInfo = null) {
+
+            Script script = Script.Get(p, scriptName);
+            if (script == null) return null;
+
+            return Create(p, level, script, perms, data, repeatable, thisBool, runArgs, clickInfo);
+        }
+
+        /// <summary>
+        /// Returns a new script runner to run on the given level using the given script.
+        /// </summary>
+        public static ScriptRunner Create(Player p, Level level, Script script, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, ClickInfo clickInfo = null) {
             ScriptRunner runner = new ScriptRunner();
 
-            runner.script = Script.Get(p, scriptName);
-            if (runner.script == null) { return null; }
-
+            runner.script = script;
             runner.p = p;
             runner.scriptData = Core.GetScriptData(runner.p);
-            runner.startingLevel = p.level;
-            runner.startingLevelName = p.level.name;
-            runner.scriptName = scriptName;
+            runner.startingLevel = level;
+            runner.scriptName = script.name;
             runner.perms = perms;
             runner.cmdData = data;
             runner.repeatable = repeatable;
@@ -1534,6 +1619,7 @@ namespace PluginCCS {
             runner.clickInfo = clickInfo;
             return runner;
         }
+
     }
 
 
@@ -1613,7 +1699,7 @@ namespace PluginCCS {
         public Player p;
         public ScriptData scriptData;
         public Level startingLevel;
-        public string startingLevelName;
+        public string startingLevelName { get { return startingLevel.name; } }
         public string scriptName;
         public string startLabel;
         public RunnerPerms perms = null;
@@ -1641,8 +1727,9 @@ namespace PluginCCS {
 
         bool _cancelled;
         public bool cancelled {
-            get {if (p.Socket.Disconnected && startLabel == ScriptRunner.LABEL_ON_EXIT) { return false; } 
-            //Prevents script from cancelling immediately if #onExit is running
+            get {
+                if (p.Socket.Disconnected && startLabel == LABEL_ON_EXIT) { return false; } 
+                //Prevents script from cancelling immediately if #onExit is running
                 return _cancelled || startingLevelName != p.level.name.ToLower(); 
             }
             set {
@@ -1911,7 +1998,13 @@ namespace PluginCCS {
         const string LABEL_ON_JOIN = "#onJoin";
         const string ACCESS_CONTROL = "#accessControl";
         readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, ACCESS_CONTROL };
-        public static void PerformScript(Player p, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
+        
+
+        /// <summary>
+        /// When the level this script runs in is security-critical,
+        /// you must cache the level you check permissions for and pass it to this method rather than using p.level
+        /// </summary>
+        public static void PerformScript(Player p, Level level, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
             //pass in string arguments after label saparated by | characters
             string[] runArgs = startLabel.Split('|');
             startLabel = runArgs[0];
@@ -1928,7 +2021,7 @@ namespace PluginCCS {
             }
 
             try {
-                ScriptRunner scriptRunner = ScriptRunner.Create(p, scriptName, perms, data, repeatable, thisBool, runArgs, clickInfo);
+                ScriptRunner scriptRunner = Create(p, level, scriptName, perms, data, repeatable, thisBool, runArgs, clickInfo);
                 if (scriptRunner != null) {
                     scriptRunner.Run(startLabel);
                 }
@@ -1936,11 +2029,11 @@ namespace PluginCCS {
                 if (!repeatable) p.Extras[thisBool] = false;
             }
         }
-        public static void PerformScriptOnNewThread(Player p, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
+        public static void PerformScriptOnNewThread(Player p, Level level, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
             Thread thread = new Thread(
                     () => {
                         try {
-                            PerformScript(p, scriptName, startLabel, perms, repeatable, data, clickInfo);
+                            PerformScript(p, level, scriptName, startLabel, perms, repeatable, data, clickInfo);
                         } catch (Exception ex) {
                             Logger.LogError(ex);
                             p.Message("&WAn error occured: {0}", ex.Message);
@@ -1961,18 +2054,18 @@ namespace PluginCCS {
 
             ScriptData scriptData = Core.GetScriptData(p);
             scriptData.SetString("denyAccess", "", RunnerPerms.Staff, levelName);
-            PerformScript(p, levelName, ACCESS_CONTROL, RunnerPerms.Staff, false, CommandData());
+            PerformScript(p, p.level, levelName, ACCESS_CONTROL, RunnerPerms.Staff, false, CommandData());
 
             return scriptData.GetString("denyAccess", RunnerPerms.Staff, levelName).CaselessEq("true");
         }
         /// <summary>
-        /// Tries to perform #onExit for the given level name, single-threaded
+        /// Tries to perform #onExit for the given level, single-threaded
         /// </summary>
-        public static void PerformOnExit(Player p, string levelName) {
-            string filePath = Script.FullPath(levelName);
+        public static void PerformOnExit(Player p, Level level) {
+            string filePath = Script.FullPath(level.name);
             if (!File.Exists(filePath)) { return; }
 
-            PerformScript(p, levelName, LABEL_ON_EXIT, RunnerPerms.Staff, false, CommandData());
+            PerformScript(p, level, level.name, LABEL_ON_EXIT, RunnerPerms.Staff, false, CommandData());
             //Single-threaded because we need this to finish before the script variables get reset when player spawning is called
         }
         /// <summary>
@@ -1994,9 +2087,15 @@ namespace PluginCCS {
             if (!File.Exists(filepath)) { return; }
 
             //Run on new thread to prevent "lagging" the player from script actions/delays.
-            PerformScriptOnNewThread(p, scriptName, LABEL_ON_JOIN, perms, false, CommandData());
+            PerformScriptOnNewThread(p, level, scriptName, LABEL_ON_JOIN, perms, false, CommandData());
         }
 
+        /// <summary>
+        /// For use in CmdScriptAction. Is there a better way to do this?
+        /// </summary>
+        public void Run(string startLabel, CmdScriptAction instance) {
+            Run(startLabel, 1);
+        }
         void Run(string startLabel, int newThreadNestLevel = 1) {
             this.startLabel = startLabel;
 
@@ -2616,7 +2715,7 @@ namespace PluginCCS {
                 }
 
                 if (!run.script.HasLabel(newThreadLabel)) { run.Error("Unknown newthread label \"" + newThreadLabel + "\"."); return; }
-                ScriptRunner scriptRunner = ScriptRunner.Create(run.p, run.scriptName, run.perms, run.cmdData, run.repeatable, run.thisBool, newThreadRunArgs);
+                ScriptRunner scriptRunner = ScriptRunner.Create(run.p, run.startingLevel, run.scriptName, run.perms, run.cmdData, run.repeatable, run.thisBool, newThreadRunArgs);
                 if (scriptRunner == null) { run.Error("Could not compile script or could not create script runner instance for newthread"); return; }
                 run.DoNewThreadRunScript(scriptRunner, newThreadLabel);
             }
