@@ -1732,8 +1732,12 @@ namespace PluginCCS {
         bool _cancelled;
         public bool cancelled {
             get {
+                //If running on exit, don't cancel when they've disconnected
                 if (p.Socket.Disconnected && startLabel == LABEL_ON_EXIT) { return false; } 
-                //Prevents script from cancelling immediately if #onExit is running
+                
+                //otherwise always cancel if disconnected
+                if (p.Socket.Disconnected) { return true; }
+                
                 return _cancelled || startingLevelName != p.level.name.ToLower(); 
             }
             set {
