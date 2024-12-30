@@ -1718,7 +1718,7 @@ namespace PluginCCS {
         public int actionIndex;
         public List<int> comebackToIndex = new List<int>();
         public List<Thread> newthreads = new List<Thread>();
-        int actionCounter;
+        public int actionCounter { get; private set; }
         int newThreadNestLevel;
 
         public static bool isCefMessage(string message) { return message.StartsWith("cef "); }
@@ -4218,6 +4218,19 @@ namespace PluginCCS {
             public override string desc { get { return "Has a value of \"true\" if the player is playing on a mobile device."; } }
             public override string Getter(ScriptRunner run) {
                 return run.hasMobile ? "true" : "";
+            }
+        }
+
+        public class actionCount : ReadOnlyPackage {
+            public override string desc { get { return "The integer number of how many actions have ran so far (not counting the action this value is retrieved in)."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.actionCounter.ToString();
+            }
+        }
+        public class actionLimit : ReadOnlyPackage {
+            public override string desc { get { return "The integer number of how many actions this script can run before it automatically terminates."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.perms.actionLimit.ToString();
             }
         }
 
