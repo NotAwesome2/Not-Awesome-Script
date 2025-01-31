@@ -2194,7 +2194,7 @@ namespace PluginCCS {
 
         }
 
-		bool lastConditionSuccessful = false;
+		bool lastConditionFailed = true;
         bool ShouldDoLine(ScriptLine line) {
             if (line.conditionLogic == ScriptLine.ConditionLogic.None) { return true; }
 
@@ -2203,7 +2203,7 @@ namespace PluginCCS {
 
 			//handle else
 			if (line.conditionLogic == ScriptLine.ConditionLogic.Else) {
-				doAction = !lastConditionSuccessful;
+				doAction = lastConditionFailed;
 				goto end;
 			}
 
@@ -2272,7 +2272,6 @@ namespace PluginCCS {
 
         end:
             if (line.conditionLogic == ScriptLine.ConditionLogic.IfNot) { doAction = !doAction; }
-			lastConditionSuccessful = doAction;
             return doAction;
         }
 
@@ -2283,7 +2282,12 @@ namespace PluginCCS {
         void RunScriptLine(ScriptLine line) {
             actionIndex++;
             curLine = line;
-            if (!ShouldDoLine(line)) { return; }
+            if (ShouldDoLine(line)) {
+				lastConditionFailed = false;
+			} else {
+				lastConditionFailed = true;
+				return;
+			}
 
             args = ParseMessage(line.actionArgs);
             string[] bits = args.SplitSpaces(2);
