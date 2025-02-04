@@ -1410,13 +1410,13 @@ namespace PluginCCS {
                         lineTrimmedCondition = ugh[2];
                     }
                 }
-				
-				if (line.StartsWith("else")) {
-					//[else]0 [msg i dont know you]1
+                
+                if (line.StartsWith("else")) {
+                    //[else]0 [msg i dont know you]1
                     scriptLine.conditionLogic = ScriptLine.ConditionLogic.Else;
-					string[] ugh = line.SplitSpaces(2);
-					lineTrimmedCondition = ugh[1];
-				}
+                    string[] ugh = line.SplitSpaces(2);
+                    lineTrimmedCondition = ugh[1];
+                }
 
                 string actionType = lineTrimmedCondition.Split(new char[] { ' ' })[0];
                 scriptLine.actionType = ScriptActions.GetAction(actionType);
@@ -2194,18 +2194,18 @@ namespace PluginCCS {
 
         }
 
-		bool lastConditionFailed = true;
+        bool lastConditionFailed = true;
         bool ShouldDoLine(ScriptLine line) {
             if (line.conditionLogic == ScriptLine.ConditionLogic.None) { return true; }
 
             string parsedConditionArgs = ParseMessage(line.conditionArgs);
             bool doAction = false;
 
-			//handle else
-			if (line.conditionLogic == ScriptLine.ConditionLogic.Else) {
-				doAction = lastConditionFailed;
-				goto end;
-			}
+            //handle else
+            if (line.conditionLogic == ScriptLine.ConditionLogic.Else) {
+                doAction = lastConditionFailed;
+                goto end;
+            }
 
             //handle item
             if (line.conditionType == ScriptLine.ConditionType.Item) {
@@ -2283,11 +2283,11 @@ namespace PluginCCS {
             actionIndex++;
             curLine = line;
             if (ShouldDoLine(line)) {
-				lastConditionFailed = false;
-			} else {
-				lastConditionFailed = true;
-				return;
-			}
+                lastConditionFailed = false;
+            } else {
+                lastConditionFailed = true;
+                return;
+            }
 
             args = ParseMessage(line.actionArgs);
             string[] bits = args.SplitSpaces(2);
@@ -3127,12 +3127,12 @@ namespace PluginCCS {
             }; } }
             public override string name { get { return "settohexcolor"; } }
 
-			// I've only added this since MCGalaxy complains that "'System.Math' does not contain a definition for 'Clamp'" with it missing
-			double Clamp(double value, double min, double max) {
-				if (value < min) return min;
-				if (value > max) return max;
-				return value;
-			}
+            // .net Framework 4.0 Math class not have Clamp method
+            double Clamp(double value, double min, double max) {
+                if (value < min) return min;
+                if (value > max) return max;
+                return value;
+            }
 
             public override void Behavior(ScriptRunner run) {
                 string package = run.cmdName;
