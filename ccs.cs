@@ -1410,6 +1410,13 @@ namespace PluginCCS {
                         lineTrimmedCondition = ugh[2];
                     }
                 }
+				
+				if (line.StartsWith("else")) {
+					//[else]0 [msg i dont know you]1
+                    scriptLine.conditionLogic = ScriptLine.ConditionLogic.Else;
+					string[] ugh = line.SplitSpaces(2);
+					lineTrimmedCondition = ugh[1];
+				}
 
                 string actionType = lineTrimmedCondition.Split(new char[] { ' ' })[0];
                 scriptLine.actionType = ScriptActions.GetAction(actionType);
@@ -1579,7 +1586,7 @@ namespace PluginCCS {
         public ScriptActions.ScriptAction actionType = null;
         public string actionArgs = "";
 
-        public enum ConditionLogic { None, If, IfNot }
+        public enum ConditionLogic { None, If, IfNot, Else }
         public enum ConditionType { Invalid, Item, Val, Label }
 
         public ConditionLogic conditionLogic = ConditionLogic.None;
@@ -2187,11 +2194,18 @@ namespace PluginCCS {
 
         }
 
+		bool lastConditionFailed = true;
         bool ShouldDoLine(ScriptLine line) {
             if (line.conditionLogic == ScriptLine.ConditionLogic.None) { return true; }
 
             string parsedConditionArgs = ParseMessage(line.conditionArgs);
             bool doAction = false;
+
+			//handle else
+			if (line.conditionLogic == ScriptLine.ConditionLogic.Else) {
+				doAction = lastConditionFailed;
+				goto end;
+			}
 
             //handle item
             if (line.conditionType == ScriptLine.ConditionType.Item) {
@@ -2268,7 +2282,12 @@ namespace PluginCCS {
         void RunScriptLine(ScriptLine line) {
             actionIndex++;
             curLine = line;
-            if (!ShouldDoLine(line)) { return; }
+            if (ShouldDoLine(line)) {
+				lastConditionFailed = false;
+			} else {
+				lastConditionFailed = true;
+				return;
+			}
 
             args = ParseMessage(line.actionArgs);
             string[] bits = args.SplitSpaces(2);
@@ -3108,6 +3127,13 @@ namespace PluginCCS {
             }; } }
             public override string name { get { return "settohexcolor"; } }
 
+			// I've only added this since MCGalaxy complains that "'System.Math' does not contain a definition for 'Clamp'" with it missing
+			double Clamp(double value, double min, double max) {
+				if (value < min) return min;
+				if (value > max) return max;
+				return value;
+			}
+
             public override void Behavior(ScriptRunner run) {
                 string package = run.cmdName;
                 string structure = run.cmdArgs;
@@ -3115,9 +3141,9 @@ namespace PluginCCS {
                 run.GetDouble(structure + "[0]", out r);
                 run.GetDouble(structure + "[1]", out g);
                 run.GetDouble(structure + "[2]", out b);
-                r = Math.Clamp(r, 0, byte.MaxValue);
-                g = Math.Clamp(g, 0, byte.MaxValue);
-                b = Math.Clamp(b, 0, byte.MaxValue);
+                r = Clamp(r, 0, byte.MaxValue);
+                g = Clamp(g, 0, byte.MaxValue);
+                b = Clamp(b, 0, byte.MaxValue);
                 run.SetString(package, Utils.Hex((byte)r, (byte)g, (byte)b).TrimStart('#'));
             }
         }
@@ -4375,6 +4401,12 @@ namespace PluginCCS {
                 "For any of the above, \"if\" can be substituted for \"ifnot\" to reverse the logic.",
                 "    For example:",
                 "-       ifnot recognized msg Shady dude: I don't know you.",
+                "",
+                "else [Action]",
+                "    The [Action] will only be performed if the previous conditional statement failed.",
+                "    For example:",
+                "-       ifnot recognized msg Shady dude: I don't know you.",
+                "-       else msg Shady dude: Wait a minute... I think I might recognize you.",
             };
 
             public override List<string> Body() {
