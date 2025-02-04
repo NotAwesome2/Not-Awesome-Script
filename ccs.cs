@@ -1411,7 +1411,7 @@ namespace PluginCCS {
                     }
                 }
                 
-                if (line.StartsWith("else")) {
+                if (line.StartsWith("else ")) {
                     //[else]0 [msg i dont know you]1
                     scriptLine.conditionLogic = ScriptLine.ConditionLogic.Else;
                     string[] ugh = line.SplitSpaces(2);
@@ -2194,7 +2194,7 @@ namespace PluginCCS {
 
         }
 
-        bool lastConditionFailed = true;
+        bool lastConditionFailed = false;
         bool ShouldDoLine(ScriptLine line) {
             if (line.conditionLogic == ScriptLine.ConditionLogic.None) { return true; }
 
