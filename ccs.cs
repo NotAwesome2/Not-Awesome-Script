@@ -1366,8 +1366,9 @@ namespace PluginCCS {
                     continue;
                 }
 
-                ScriptLine scriptLine = new ScriptLine(scriptName, uses); //This uses is okay because modifying it later will modify the structure this points to
-                scriptLine.lineNumber = lineNumber;
+                //This uses is okay because modifying it later will modify the structure this points to
+                ScriptLine scriptLine = new ScriptLine(scriptName, uses, lineNumber);
+                
                 string lineTrimmedCondition = line;
                 if (line.StartsWith("if")) {
                     Action LackingArgs = () => {
@@ -1557,17 +1558,63 @@ namespace PluginCCS {
 
         public class Uses {
             public const string PREFIX = "using ";
-            public const string CEF = "cef";
+
+            public static readonly string[] Documentation = new string[] {
+                "Top level statements are like option toggles for the entire script.",
+                "    To activate any given statement, write it *once* somewhere in your script (at the top is standard practice).",
+                "    If you do not write them, they will not be activated (false) by default.",
+                "",
+                "\"using\" statements:",
+                "-   using "+CEF,
+                "        This allows you to send cef commands to the user through the msg Action. These are normally disallowed because",
+                "        Youtube, which people have historically used for cef soundtracks, is very unreliable now and will give a poor user experience.",
+                "-   using "+QUIT_RESETS_RUNARGS,
+                "        This makes it so that whenever script runs a \"quit\" action, all runArgs (except 0) will be reset.",
+                "-   using "+ALLOW_INCLUDE,
+                "        Allows this script's contents to be included in another script.",
+                "-   using "+LOCAL_PACKAGES,
+                "        Makes packages that are prefixed with \"l_\" treated as local packages",
+                "        Local packages are unique to every individual instance of script which is running.",
+                "        They always start with blank values and other scripts which are running at the same time cannot interfere with them.",
+                "        Local packages also count newthreads as being separate script instances, so they will not carry over when using newthread action.",
+                "        Note that local packages are a unique category when using "+new ScriptActions.ResetData().name+" Action.",
+                "",
+                "\"include\" statement:",
+                "-   include [scriptname]",
+                "        This is similar to C \"#include\".",
+                "        All of the contents of [scriptname] will be copy-pasted into your script when it is compiled.",
+                "        For example:",
+                "-           include libs/advlib",
+                "            This is useful because it allows you to use other scripts as a library of reuseable functions.",
+                "            In this example, you'd now be able to call advlib's \"#Text.print\" label from within your script.",
+                "            (docs relating to libs can be found here: https://notawesome.cc/docs/nas/)",
+                "        To include a script from an OS map, use the map named prefixed with \"os/\".",
+                "        For example:",
+                "-           include os/goodlyay+24",
+                "        It should be noted that any Actions that run from an included script will",
+                "        respect the \"using\" statements of the script they originally came from."
+            };
+
+            
+
+            const string CEF = "cef";
+            const string QUIT_RESETS_RUNARGS = "quit_resets_runargs";
+            public const string LOCAL_PACKAGES = "local_packages";
+
             public bool cef;
-            public const string QUIT_RESETS_RUNARGS = "quit_resets_runargs";
             public bool quitResetsRunArgs;
+            public bool local_packages;
+
             public const string ALLOW_INCLUDE = "allow_include";
+            public const string LOCAL_PACKAGES_PREFIX = "l_";
 
             public bool ReadLine(string line) {
                 if (!line.StartsWith(PREFIX)) { return false; }
                 line = line.Substring(PREFIX.Length);
 
-                if (line == CEF) { cef = true; } else if (line == QUIT_RESETS_RUNARGS) { quitResetsRunArgs = true; }
+                if (line == CEF) { cef = true; }
+                else if (line == QUIT_RESETS_RUNARGS) { quitResetsRunArgs = true; }
+                else if (line == LOCAL_PACKAGES) { local_packages = true; }
 
                 return true;
             }
@@ -1576,13 +1623,15 @@ namespace PluginCCS {
     }
 
     public class ScriptLine {
-        public ScriptLine(string scriptName, Script.Uses uses) {
+        public ScriptLine(string scriptName, Script.Uses uses, int lineNumber) {
             this.scriptName = scriptName;
             this.uses = uses;
+            this.lineNumber = lineNumber;
         }
         public readonly string scriptName;
         public readonly Script.Uses uses;
-        public int lineNumber;
+        public readonly int lineNumber;
+
         public ScriptActions.ScriptAction actionType = null;
         public string actionArgs = "";
 
@@ -1692,6 +1741,11 @@ namespace PluginCCS {
 
         public static PersistentMessagePriority CpeMessagePriority = PersistentMessagePriority.High;
 
+        public const string CPE_ANNOUNCE_NAMES = "announce, bigannounce, smallannounce";
+        public const string CPE_FIELD_NAMES = "top1, top2, top3, bot1, bot2, bot3, " + CPE_ANNOUNCE_NAMES;
+        /// <summary>
+        /// Returns CpeMessageType.Normal if an unknown type is passed
+        /// </summary>
         public static CpeMessageType GetCpeMessageType(string type) {
             if (type == "bot1") { return bot1; }
             if (type == "bot2") { return bot2; }
@@ -1725,6 +1779,12 @@ namespace PluginCCS {
         public int actionIndex;
         public List<int> comebackToIndex = new List<int>();
         public List<Thread> newthreads = new List<Thread>();
+
+        Dictionary<string, string> localPackages = new Dictionary<string, string>();
+        public void ClearLocalPackages(string matcher) {
+            localPackages.Clear(matcher);
+        }
+
         public int actionCounter { get; private set; }
         int newThreadNestLevel;
 
@@ -2348,6 +2408,16 @@ namespace PluginCCS {
         }
 
         public string GetString(string stringName) {
+            if (curLine != null && curLine.uses.local_packages && stringName.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX)) {
+                stringName = stringName.ToUpper();
+                string value;
+                if (localPackages.TryGetValue(stringName, out value)) {
+                    return value;
+                }
+                else {
+                    return "";
+                }
+            }
 
             if (stringName.Length > 6 && stringName.CaselessStarts("runArg")) {
                 int runArgIndex;
@@ -2374,6 +2444,10 @@ namespace PluginCCS {
             return scriptData.GetString(stringName, perms, scriptName);
         }
         public void SetString(string stringName, string value) {
+            if (curLine != null && curLine.uses.local_packages && stringName.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX)) {
+                localPackages[stringName.ToUpper()] = value;
+                return;
+            }
 
             ReadOnlyPackages.ReadOnlyPackage rop = ReadOnlyPackages.GetReadOnlyPackage(this, stringName);
             if (rop != null) { Error("You cannot set a value to the preset package \"{0}\" because it is read only", rop.GetType().Name); return; }
@@ -2565,7 +2639,7 @@ namespace PluginCCS {
             public override string[] documentation { get { return new string[] {
                 "[cpe message field] <message>",
                 "    same as msg, but allows you to send to the other special chat fields in top right, bottom right, or center.",
-                "    valid cpe message fields are: top1, top2, top3, bot1, bot2, bot3, announce, bigannounce, smallannounce",
+                "    valid cpe message fields are: "+ScriptRunner.CPE_FIELD_NAMES,
                 "    However, unlike msg, these are limited to 64 characters at most. Remember, color codes count as 2 characters!",
                 "    The \"announce\" fields automatically disappear after 5 seconds.\",",
                 "    The rest stay forever unless you reset them by sending a completely blank message (or the player leaves the map).",
@@ -2581,6 +2655,42 @@ namespace PluginCCS {
                     run.amountOfCharsInLastMessage = run.cmdArgs.Length;
                 }
                 run.p.SendCpeMessage(type, run.cmdArgs, ScriptRunner.CpeMessagePriority);
+            }
+        }
+        public class LocalMessage : ScriptAction {
+            const string CPE_CHAT_NAME = "chat";
+            public override string[] documentation { get { return new string[] {
+                "[cpe message field] <message>",
+                "    same as cpemsg, but sends to all players in the level similar to death messages and local chat.",
+                "    To send a message to normal chat, use \""+CPE_CHAT_NAME+"\" for [cpe message field]"
+            }; } }
+
+            public override string name { get { return "localmsg"; } }
+
+            public override void Behavior(ScriptRunner run) {
+
+                CpeMessageType type = ScriptRunner.GetCpeMessageType(run.cmdName);
+
+                //We want the user to be explicit about sending to chat, rather than it happening accidentally
+                //e.g. avoid "localmsg Hello everyone!" -> "everyone!"
+                if (type == CpeMessageType.Normal && run.cmdName != CPE_CHAT_NAME) {
+                    run.Error("Invalid cpe message field \"{0}\" in localmessage", run.cmdName);
+                    return;
+                }
+
+                //Gutted version of
+                //Chat.MessageFrom(ChatScope scope, Player source, string msg, object arg, ChatMessageFilter filter, bool relay = false)
+                //We needed to get rid of the event call
+                //Plus use CpeMessage
+
+                Player[] players = PlayerInfo.Online.Items;
+                foreach (Player pl in players) {
+                    if (!Chat.FilterLevel(pl, run.p.level)) continue;
+                    if (Chat.Ignoring(pl, run.p)) continue;
+
+                    if (type == CpeMessageType.Normal) { pl.Message(run.cmdArgs); }
+                    else { pl.SendCpeMessage(type, run.cmdArgs, ScriptRunner.CpeMessagePriority); }
+                }
             }
         }
         public class MenuMessage : ScriptAction {
@@ -3164,15 +3274,18 @@ namespace PluginCCS {
                     run.scriptData.ShowAllStrings();
                     return;
                 }
-                string[] values = run.args.SplitSpaces();
+                string[] packages = run.args.SplitSpaces();
                 bool saved;
 
-                foreach (string value in values) {
-                    string shown = run.GetString(value);
+                foreach (string package in packages) {
+                    string shown = run.GetString(package);
                     shown = EscapeColorCodes(shown, "&o");
-                    run.p.Message("The value of &b{0} &Sis \"&o{1}&S\".",
-                        run.scriptData.ValidateStringName(value, run.perms, run.scriptName, out saved).ToLower(),
-                        shown);
+                    string color = package.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX) ? "&3" : "&b";
+                    run.p.Message("The value of {0}{1} &Sis \"&o{2}&S\".",
+                        color,
+                        run.scriptData.ValidateStringName(package, run.perms, run.scriptName, out saved).ToLower(),
+                        shown)
+                        ;
                 }
             }
             public static string EscapeColorCodes(string shown, string interrupt) {
@@ -3214,6 +3327,7 @@ namespace PluginCCS {
                 "        \"packages\" - resets packages",
                 "        \"items\" - resets items",
                 "        \"saved\" - resets saved packages related to the current script (staff only)",
+                "        \"locals\" - resets local packages (see "+new Docs.TopLevelStatementsSection().Name+" section on using "+Script.Uses.LOCAL_PACKAGES+")",
                 "    <pattern> is an optional search pattern that only resets matching names. If not specified, everything is reset.",
                 "        Use the special characters * and ? to specify the search pattern.",
                 "        * is a substitute for 0 or more characters, and ? is a substitute for 1 character.",
@@ -3233,6 +3347,14 @@ namespace PluginCCS {
             public override string name { get { return "resetdata"; } }
 
             public override void Behavior(ScriptRunner run) {
+                if (run.cmdName.CaselessEq("locals")) {
+                    if (!run.curLine.uses.local_packages) {
+                        run.Error("This script does not use local packages. Therefore, resetting them will be treated as a mistake");
+                        return;
+                    }
+                    run.ClearLocalPackages(run.cmdArgs);
+                    return;
+                }
                 if (run.cmdName.CaselessStarts("packages")) {
                     run.scriptData.Reset(true, false, run.cmdArgs);
                     return;
@@ -3871,7 +3993,6 @@ namespace PluginCCS {
                 return new Vec3F32((float)x, (float)y, (float)z);
             }
         }
-
         public abstract class Event : ScriptAction {
             public override string[] documentation { get { throw new MemberAccessException(); } }
 
@@ -4532,39 +4653,8 @@ namespace PluginCCS {
         }
         public class TopLevelStatementsSection : Section {
             public override string Name { get { return "Top Level Statements"; } }
-
-            static string[] body = new string[] {
-                "Top level statements are like option toggles for the entire script.",
-                "    To activate any given statement, write it *once* somewhere in your script (at the top is standard practice).",
-                "    If you do not write them, they will not be activated (false) by default.",
-                "",
-                "\"using\" statements:",
-                "-   using "+Script.Uses.CEF,
-                "        This allows you to send cef commands to the user through the msg Action. These are normally disallowed because",
-                "        Youtube, which people have historically used for cef soundtracks, is very unreliable now and will give a poor user experience.",
-                "-   using "+Script.Uses.QUIT_RESETS_RUNARGS,
-                "        This makes it so that whenever script runs a \"quit\" action, all runArgs (except 0) will be reset.",
-                "-   using "+Script.Uses.ALLOW_INCLUDE,
-                "        Allows this script's contents to be included in another script.",
-                "",
-                "\"include\" statement:",
-                "-   include [scriptname]",
-                "        This is similar to C \"#include\".",
-                "        All of the contents of [scriptname] will be copy-pasted into your script when it is compiled.",
-                "        For example:",
-                "-           include libs/advlib",
-                "            This is useful because it allows you to use other scripts as a library of reuseable functions.",
-                "            In this example, you'd now be able to call advlib's \"#Text.print\" label from within your script.",
-                "            (docs relating to libs can be found here: https://notawesome.cc/docs/nas/)",
-                "        To include a script from an OS map, use the map named prefixed with \"os/\".",
-                "        For example:",
-                "-           include os/goodlyay+24",
-                "        It should be noted that any Actions that run from an included script will",
-                "        respect the \"using\" statements of the script they originally came from."
-            };
-
             public override List<string> Body() {
-                return body.ToList();
+                return Script.Uses.Documentation.ToList();
             }
         }
         public class StaffSection : Section {
@@ -4600,11 +4690,10 @@ namespace PluginCCS {
 
 
     public class ReplyData {
-        //public string replyMessage;
-        public string scriptName;
-        public string labelName;
-        public RunnerPerms perms;
-        public bool notifyPlayer;
+        public readonly string scriptName;
+        public readonly string labelName;
+        public readonly RunnerPerms perms;
+        public readonly bool notifyPlayer;
         public ReplyData(string scriptName, string labelName, RunnerPerms perms, bool notifyPlayer) {
             this.scriptName = scriptName;
             this.labelName = labelName;
@@ -4829,12 +4918,7 @@ namespace PluginCCS {
         }
         void ResetDict<T>(Dictionary<string, T> dict, string matcher) {
             lock (packagesLocker) {
-                if (matcher.Length == 0) { dict.Clear(); return; }
-                List<string> keysToRemove = MatchingKeys(dict, matcher);
-                foreach (string key in keysToRemove) {
-                    //p.Message("removing key {0}", key);
-                    dict.Remove(key);
-                }
+                dict.Clear(matcher);
             }
         }
         public void ResetSavedStrings(string scriptName, string matcher) {
@@ -4845,10 +4929,6 @@ namespace PluginCCS {
                 pattern = pattern + "*";
             }
             ResetDict(savedStrings, pattern);
-        }
-        static List<string> MatchingKeys<T>(Dictionary<string, T> dict, string keyword) {
-            var keys = dict.Keys.ToList();
-            return Wildcard.Filter(keys, keyword, key => key);
         }
 
         public void WriteSavedStringsToDisk() {
@@ -5662,13 +5742,31 @@ namespace PluginCCS {
             return double.TryParse(arg, doubleStyle, CultureInfo.InvariantCulture, out value);
         }
     }
-    public static class StringExtensions {
+    public static class Extensions {
 
         /// <summary>
         /// Returns input with curly braces escaped such that they do not get formatted via string.Format.
         /// </summary>
         public static string EscapeCurlyBraces(this string input) {
             return input.Replace("{", "{{").Replace("}", "}}");
+        }
+
+
+        static List<string> MatchingKeys<T>(Dictionary<string, T> dict, string keyword) {
+            var keys = dict.Keys.ToList();
+            return Wildcard.Filter(keys, keyword, key => key);
+        }
+
+        /// <summary>
+        /// Clears the dictionary of any keys that are matched. If matcher is zero-length, all elements are cleared.
+        /// </summary>
+        public static void Clear<T>(this Dictionary<string, T> dict, string matcher) {
+            if (matcher.Length == 0) { dict.Clear(); return; }
+            List<string> keysToRemove = MatchingKeys(dict, matcher);
+            foreach (string key in keysToRemove) {
+                //p.Message("removing key {0}", key);
+                dict.Remove(key);
+            }
         }
 
     }
