@@ -1471,7 +1471,7 @@ namespace PluginCCS {
         public static void OnPlayerCommand(Player p, string cmd, string message, CommandData data) {
             string calledLabel;
             bool async;
-            if (cmd.CaselessEq("input")) {
+            if (cmd.CaselessEq("input") || cmd.CaselessEq("in")) {
                 calledLabel = ScriptRunner.INPUT_LABEL; async = false;
             } else if (cmd.CaselessEq("inputAsync")) {
                 calledLabel = ScriptRunner.ASYNC_LABEL; async = true;
