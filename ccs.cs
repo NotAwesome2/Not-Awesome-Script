@@ -3360,7 +3360,7 @@ namespace PluginCCS {
                     return;
                 }
                 if (run.cmdName.CaselessStarts("items")) {
-                    if (!run.perms.canSave) { run.Error("Cannot reset items in non-os script"); return; }
+                    if (run.perms.canSave) { run.Error("Cannot reset items in non-os script"); return; }
                     run.scriptData.Reset(false, true, run.cmdArgs);
                     return;
                 }
@@ -3700,7 +3700,7 @@ namespace PluginCCS {
                 if (!CommandParser.GetCoords(run.p, stringCoords, 0, ref coords)) { run.ErrorAbove(); }
                 run.SetString(packageName, ClientBlockID(run.p.level.GetBlock((ushort)coords.X, (ushort)coords.Y, (ushort)coords.Z)).ToString());
             }
-            static BlockID ClientBlockID(BlockID serverBlockID) {
+            public static BlockID ClientBlockID(BlockID serverBlockID) {
                 return Block.ToRaw(Block.Convert(serverBlockID));
             }
         }
@@ -4265,6 +4265,13 @@ namespace PluginCCS {
             public override string Getter(ScriptRunner run) {
                 Vec3S32 pos = run.p.Pos.FeetBlockCoords;
                 return pos.X + " " + pos.Y + " " + pos.Z;
+            }
+        }
+        public class PlayerHeldBlock : ReadOnlyPackage {
+            public override string desc { get { return "The id of the block the player is currently holding."; } }
+
+            public override string Getter(ScriptRunner run) {
+                return ScriptActions.SetBlockID.ClientBlockID(run.p.GetHeldBlock()).ToString();
             }
         }
         public class PlayerX : ReadOnlyPackage {
