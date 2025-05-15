@@ -3347,6 +3347,13 @@ namespace PluginCCS {
             public override string name { get { return "resetdata"; } }
 
             public override void Behavior(ScriptRunner run) {
+
+                //No .Contains for char in .net framework 4.0 :))
+                if (run.cmdArgs.IndexOf(' ') != -1) {
+                    run.Error("resetdata does not accept spaces in the <pattern> argument because packages and item names cannot have spaces.");
+                    return;
+                }
+
                 if (run.cmdName.CaselessEq("locals")) {
                     if (!run.curLine.uses.local_packages) {
                         run.Error("This script does not use local packages. Therefore, resetting them will be treated as a mistake");
