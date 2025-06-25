@@ -24,6 +24,7 @@ using NA2;
 using System.Globalization;
 using MCGalaxy.Tasks;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 //COLLAPSE EVERYTHING IN VS WITH CTRL M A
 namespace PluginCCS {
@@ -802,6 +803,11 @@ namespace PluginCCS {
             if (ScriptRunner.PerformAccessControl(p, lvl.name)) {
                 canJoin = false;
                 lvl.AutoUnload();
+            }
+
+            if (canJoin) {
+                ScriptData data = GetScriptData(p);
+                data.RevertSkin(false);
             }
         }
         static void OnPlayerSpawning(Player p, ref Position pos, ref byte yaw, ref byte pitch, bool respawning) {
@@ -2171,6 +2177,21 @@ namespace PluginCCS {
         public void Run(string startLabel, CmdScriptAction instance) {
             Run(startLabel, 1);
         }
+        
+        void CheckClientName() {
+            if (p.Session.appName == null) return;
+
+            if (p.Session.appName.Contains(" cef")) {
+                hasCef = true;
+            }
+            if ((p.Session.appName.CaselessContains("mobile") || p.Session.appName.CaselessContains("android"))) {
+                hasMobile = true;
+            }
+            if (p.Session.appName.CaselessContains("web")) {
+                hasWebclient = true;
+            }
+        }
+
         void Run(string startLabel, int newThreadNestLevel = 1) {
             this.startLabel = startLabel;
 
@@ -2196,16 +2217,7 @@ namespace PluginCCS {
 
             scriptData.AddActiveScript(this);
 
-
-            if (p.Session.appName != null && p.Session.appName.Contains(" cef")) {
-                hasCef = true;
-            }
-            if (p.Session.appName != null && (p.Session.appName.CaselessContains("mobile") || p.Session.appName.CaselessContains("android"))) {
-                hasMobile = true;
-            }
-            if (p.Session.appName != null && p.Session.appName.CaselessContains("web")) {
-                hasWebclient = true;
-            }
+            CheckClientName();
 
             SetString("msgdelaymultiplier", "50");
 
@@ -2595,8 +2607,8 @@ namespace PluginCCS {
             }
 
 
-            protected bool GetCoordsFloat(ScriptRunner run, out Vec3F32 coords) {
-                string[] stringCoords = run.args.SplitSpaces();
+            protected bool GetCoordsFloat(ScriptRunner run, string arg, out Vec3F32 coords) {
+                string[] stringCoords = arg.SplitSpaces();
                 coords = new Vec3F32();
                 if (stringCoords.Length < 3) { run.Error("Not enough arguments for {0}", name); return false; }
                 if (!CommandParser2.GetCoords(run.p, stringCoords, 0, ref coords)) { run.ErrorAbove(); return false; }
@@ -2632,6 +2644,127 @@ namespace PluginCCS {
                 if (!(run.hasCef && run.curLine.uses.cef) && ScriptRunner.isCefMessage(run.args)) { return; }
                 run.amountOfCharsInLastMessage = run.args.Length;
                 run.p.Message(run.args);
+            }
+        }
+
+        public class Chatsound : ScriptAction {
+            public override string[] documentation { get { return new string[] {
+                "me [chatsound]",
+                "    Plays a chatsound for this player, as if coming from self",
+                "    The player must have chatsounds plugin v3.13 or newer to hear sounds from cs Actions.",
+                "    https://github.com/SpiralP/classicube-chatsounds-plugin",
+                "cs pos [block coords] [chatsound]",
+                "    Plays a chatsound for this player, as if coming from the given coordinates.",
+                "cs bot [botName] [chatsound]",
+                "    Plays a chatsound for this player, as if coming from the given bot or tempbot.",
+            }; } }
+
+            public override string name { get { return "cs"; } }
+
+            static Version minCsVersion = new Version("3.13");
+            public override void Behavior(ScriptRunner run) {
+                if (!HasPlugin._HasPlugin(run, "cs", minCsVersion)) return;
+
+                string func = run.cmdName.ToLower();
+                if (run.cmdArgs == "") {
+                    run.Error("Not enough arguments provided for chatsound Action");
+                    return;
+                }
+
+                if (func == "me") {
+                    Me(run, run.cmdArgs);
+                    return;
+                }
+                if (func == "pos") {
+                    string[] bits = run.cmdArgs.SplitSpaces(4);
+                    if (bits.Length != 4) {
+                        run.Error("Not enough arguments provided for chatsound pos Action");
+                        return;
+                    }
+                    string sCoords = String.Format("{0} {1} {2}", bits[0], bits[1], bits[2]);
+                    string cs = bits[3];
+
+                    Vec3F32 coords;
+                    if (!GetCoordsFloat(run, sCoords, out coords)) return;
+                    Pos(run, coords, cs);
+                    return;
+                }
+                if (func == "bot") {
+                    string[] bits = run.cmdArgs.SplitSpaces(2);
+                    if (bits.Length != 2) {
+                        run.Error("Not enough arguments provided for chatsound bot Action");
+                        return;
+                    }
+                    string botName = bits[0];
+                    string cs = bits[1];
+
+
+                    object o;
+                    if (run.p.Extras.TryGet("TempBot_BotList", out o)) {
+                        //Player's current Tempbots, shared and used by CustomModels plugin
+                        List<PlayerBot> tBots = (List<PlayerBot>)o;
+
+                        for (int i = 0; i < tBots.Count; i++) {
+                            if (i >= tBots.Count) { break; } //The list may change length while we're iterating
+                            try {
+                                PlayerBot b = tBots[i];
+                                if (!b.name.CaselessEq(botName)) continue;
+                                Bot(run, b, cs);
+                            } catch {
+                                //In case a thread-related error occurs
+                                break;
+                            }
+                        }
+                    }
+
+                    PlayerBot[] levelBots = run.p.level.Bots.Items;
+                    foreach (PlayerBot b in levelBots) {
+                        if (!b.name.CaselessEq(botName)) continue;
+                        Bot(run, b, cs);
+                    }
+
+                    return;
+                }
+
+                run.Error("Unknown argument {0} for chatsound Action", func);
+
+            }
+            void Me(ScriptRunner run, string chatsound) {
+                chatsound = GetFormatted(run, "cs ", chatsound);
+                if (chatsound == null) return;
+                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+            }
+            void Pos(ScriptRunner run, Vec3F32 pos, string chatsound) {
+                //Rounding cuts down on characters and the precision lost doesn't matter much for sound position
+                string prefix = String.Format("cspos {0} {1} {2}",
+                    Math.Round(pos.X, 1),
+                    Math.Round(pos.Y, 1),
+                    Math.Round(pos.Z, 1)
+                    );
+                chatsound = GetFormatted(run, prefix, chatsound);
+                if (chatsound == null) return;
+
+                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+            }
+            void Bot(ScriptRunner run, PlayerBot b, string chatsound) {
+                byte ID;
+                if (!run.p.EntityList.GetID(b, out ID)) return;
+                string prefix = "csent " + ID;
+                chatsound = GetFormatted(run, prefix, chatsound);
+                if (chatsound == null) return;
+
+                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+            }
+
+            string GetFormatted(ScriptRunner run, string prefix, string chatsound) {
+                chatsound = prefix + " " + chatsound;
+
+                if (chatsound.Length > NetUtils.StringSize) {
+                    run.Error("Chatsound \"{0}\" is {1} characters but must be {2} at most.", chatsound, chatsound.Length, NetUtils.StringSize);
+                    return null;
+                }
+
+                return chatsound;
             }
         }
 
@@ -3524,7 +3657,7 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 Vec3F32 coords;
-                if (!GetCoordsFloat(run, out coords)) { return; }
+                if (!GetCoordsFloat(run, run.args, out coords)) { return; }
 
                 Position pos = new Position();
                 pos.X = (int)(coords.X * 32) + 16;
@@ -3536,7 +3669,7 @@ namespace PluginCCS {
                 if (run.p.Supports(CpeExt.SetSpawnpoint)) {
                     run.p.Send(Packet.SetSpawnpoint(pos, run.p.Rot, run.p.Supports(CpeExt.ExtEntityPositions)));
                 } else {
-                    run.p.SendPos(Entities.SelfID, pos, run.p.Rot);
+                    run.p.SendAndSetPos(pos, run.p.Rot);
                     Entities.Spawn(run.p, run.p);
                 }
                 run.p.Message("Your spawnpoint was updated.");
@@ -3840,8 +3973,8 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 if (run.cmdName == "") {
-                    if (run.scriptData.oldModel != null) {
-                        run.p.UpdateModel(run.scriptData.oldModel);
+                    if (run.scriptData.prevModel != null) {
+                        run.p.UpdateModel(run.scriptData.prevModel);
                     }
                     return;
                 }
@@ -3853,8 +3986,7 @@ namespace PluginCCS {
                 //don't let them change twice to same model otherwise revert doesnt work
                 if (run.p.Model.CaselessEq(run.cmdName)) { return; }
 
-                run.scriptData.oldModel = run.p.Model;
-                run.scriptData.newModel = run.cmdName;
+                run.scriptData.prevModel = run.p.Model;
 
                 run.p.UpdateModel(run.cmdName);
             }
@@ -3874,6 +4006,36 @@ namespace PluginCCS {
                 // Is there an actual word after 'model='?
                 if (motd.Length == 0) return null;
                 return motd.Split(splitChars);
+            }
+        }
+        public class ChangeSkin : ScriptAction {
+            public override string[] documentation { get { return new string[] {
+                "<skin>",
+                "    This Action allows you to temporarily change what skin someone has for the current world. Other players will be able to see it as well.",
+                "    Run this Action with no arguments to set the player's skin back to what it was before.",
+            }; } }
+
+            public override string name { get { return "changeskin"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdName == "") {
+                    run.scriptData.RevertSkin(true);
+                    return;
+                }
+
+                string rawName = run.p.name.RemoveLastPlus();
+                string skin = HttpUtil.FilterSkin(run.p, run.cmdName, rawName);
+                if (skin == null) return;
+
+                if (run.scriptData.prevSkin == null) run.scriptData.prevSkin = run.p.SkinName;
+
+                SetSkin(run.p, run.cmdName);
+            }
+
+            //Stripped down PlayerActions.SetSkin (no perma-save)
+            public static void SetSkin(Player who, string skin) {
+                who.SkinName = skin;
+                Entities.GlobalRespawn(who);
             }
         }
 
@@ -4137,7 +4299,6 @@ namespace PluginCCS {
                 run.Error("Custom error: {0}", run.args);
             }
         }
-
         public class Gui : ScriptAction {
             public override string[] documentation { get { return new string[] {
                 "[option] [value]",
@@ -4209,6 +4370,69 @@ namespace PluginCCS {
                         break;
                 }
                 run.p.Session.SendCinematicGui(run.p.CinematicGui);
+            }
+        }
+
+        public class HasPlugin : ScriptAction {
+            public override string[] documentation { get { return new string[] {
+                "[package]|[plugin name]|<version>",
+                "    Checks if the player has [plugin name] and gives [package] a value of true if they have it, otherwise false.",
+                "    <version> is optional. If a version is provided, the plugin must have that version or higher for [package] to be true.",
+                "    For example, to check for chatsounds 1.13 or greater (cs1.13.0):",
+                "-      getplugin hasChatsounds|cs|1.13",
+                "-      if hasChatsounds msg You have chatsounds plugin 1.13 or higher! Welcome.",
+                "    Note that the version number is expected to come directly after the plugin name, without spaces.",
+                "    For instance, if you would like to check for the \"Ponies v2.1\" plugin and version, the arguments should be as follows:",
+                "-      getplugin hasPonyPlugin|Ponies v|2.1",
+            }; } }
+
+            public override string name { get { return "hasplugin"; } }
+
+            public static bool _HasPlugin(ScriptRunner run, string plugin, Version minimum = null) {
+                string app = run.p.Session.appName;
+                //app = run.GetString("testclient");
+
+                if (app == null) return false;
+
+                if (minimum == null) {
+                    return app.Contains(plugin);
+                }
+
+                //Groups[1] is the first set of parenthesis
+                Match versionMatch = Regex.Match(app, @"" + Regex.Escape(plugin) + @"(\d+\.\d+)", RegexOptions.IgnoreCase);
+                if (!versionMatch.Success) return false;
+
+                Version version;
+                if (!Version.TryParse(versionMatch.Groups[1].Value, out version)) return false;
+
+                return version >= minimum;
+            }
+
+            public override void Behavior(ScriptRunner run) {
+                string[] bits = run.args.Split(ScriptRunner.pipeChar);
+                if (bits.Length < 2) {
+                    run.Error("You must provide arguments for the package name to store the resulting boolean into and the name of the plugin to try to find.");
+                    return;
+                }
+
+                string outBooleanPackageName = bits[0];
+                string pluginName = ScriptRunner.EscapeQuotes(bits[1]);
+                if (!pluginName.StartsWith(" ")) pluginName = " " + pluginName;
+
+                string minVersionString = bits.Length > 2 ? bits[2] : null;
+
+                Version minVersion;
+                if (minVersionString == null) {
+                    minVersion = null;
+                } else {
+                    if (!Version.TryParse(minVersionString, out minVersion)) {
+                        run.Error("The minimum version you provided \"{0}\" could not be parsed as a version.", minVersionString);
+                        return;
+                    }
+                }
+
+                bool result = _HasPlugin(run, pluginName, minVersion);
+                run.SetString(outBooleanPackageName, result ? "true" : "false");
             }
         }
     }
@@ -4346,7 +4570,12 @@ namespace PluginCCS {
                 return run.p.pronouns.Name;
             }
         }
-
+        public class PlayerClient : ReadOnlyPackage {
+            public override string desc { get { return "The player's client name. Empty if no client name is sent (e.g. classic client). SEE ALSO: hasplugin Action"; } }
+            public override string Getter(ScriptRunner run) {
+                return run.p.Session.appName == null ? "" : run.p.Session.appName;
+            }
+        }
 
         public class msgDelay : ReadOnlyPackage {
             public override string desc { get { return "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had."; } }
@@ -4814,8 +5043,10 @@ namespace PluginCCS {
         public SevGroup clickEvents = new SevGroup();
         public SevGroup chatEvents = new SevGroup();
 
-        public string oldModel = null;
-        public string newModel = null;
+
+        public string prevModel = null;
+        //If this isn't null, it means changeskin action was used
+        public string prevSkin = null;
 
         private readonly object packagesLocker = new object();
         private Dictionary<string, string> strings = new Dictionary<string, string>();
@@ -4921,10 +5152,23 @@ namespace PluginCCS {
             frozen = false;
             stareCoords = null;
             Reset(true, true, "");
-            oldModel = null;
-            newModel = null;
+
+
+            prevModel = null;
+            //No RevertSkin here since it's already done right before joining a level
+
             hotkeys.OnPlayerSpawning();
             customMOTD = null;
+        }
+        public void RevertSkin(bool respawnEntity) {
+            if (prevSkin == null) return;
+
+            if (respawnEntity) {
+                ScriptActions.ChangeSkin.SetSkin(p, prevSkin);
+            } else {
+                p.SkinName = prevSkin;
+            }
+            prevSkin = null;
         }
         public void Reset(bool packages, bool items, string matcher) {
             if (packages) { ResetDict(strings, matcher); }
