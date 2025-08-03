@@ -2544,6 +2544,23 @@ namespace PluginCCS {
     // ----------------------------------------------------------------- Actions
     public static class ScriptActions {
 
+        [Flags]
+        public enum Cat : int {
+            None          = 0b_0000_0000__0000_0000,
+            Basic         = 0b_0000_0000__0000_0001,
+            Control_Flow  = 0b_0000_0000__0000_0010,
+            Messages      = 0b_0000_0000__0000_0100,
+            Packages      = 0b_0000_0000__0000_1000,
+            Math          = 0b_0000_0000__0001_0000,
+            Random        = 0b_0000_0000__0010_0000,
+            Colors        = 0b_0000_0000__0100_0000,
+            Player        = 0b_0000_0000__1000_0000,
+            Items         = 0b_0000_0001__0000_0000,
+            World         = 0b_0000_0010__0000_0000,
+            Player_Events = 0b_0000_0100__0000_0000,
+            Plugins       = 0b_0000_1000__0000_0000,
+        }
+
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
         public static void PluginLoad() {
             Dic = new Dictionary<string, ScriptAction>();
@@ -2569,15 +2586,10 @@ namespace PluginCCS {
         }
 
         public abstract class ScriptAction {
+            public abstract Cat cat { get; }
             public abstract string[] documentation { get; }
             public abstract string name { get; }
             public abstract void Behavior(ScriptRunner run);
-
-            void NumberConversionFailure(ScriptRunner run, string arg, string numType) {
-                string stringValue = run.GetString(arg);
-                run.Error("Action {0} only takes {1} values but {2} has the value of \"{3}\".",
-                    name, numType, arg, Show.EscapeColorCodes(stringValue, "&S"));
-            }
 
 
             protected bool GetDoubleRawOrVal(ScriptRunner run, string arg, out double value) {
@@ -2592,7 +2604,6 @@ namespace PluginCCS {
                 NumberConversionFailure(run, arg, "integer");
                 return false;
             }
-
             protected bool GetDouble(ScriptRunner run, string arg, out double value) {
                 if (run.GetDouble(arg, out value)) { return true; }
 
@@ -2605,7 +2616,11 @@ namespace PluginCCS {
                 NumberConversionFailure(run, arg, "integer");
                 return false;
             }
-
+            void NumberConversionFailure(ScriptRunner run, string arg, string numType) {
+                string stringValue = run.GetString(arg);
+                run.Error("Action {0} only takes {1} values but {2} has the value of \"{3}\".",
+                    name, numType, arg, Show.EscapeColorCodes(stringValue, "&S"));
+            }
 
             protected bool GetCoordsFloat(ScriptRunner run, string arg, out Vec3F32 coords) {
                 string[] stringCoords = arg.SplitSpaces();
@@ -2630,6 +2645,7 @@ namespace PluginCCS {
         }
 
         public class Message : ScriptAction {
+            public override Cat cat { get { return Cat.Basic | Cat.Messages; } }
             public override string[] documentation { get { return new string[] {
                 "[message]",
                 "    sends a message to the player.",
@@ -2646,8 +2662,9 @@ namespace PluginCCS {
                 run.p.Message(run.args);
             }
         }
-
         public class Chatsound : ScriptAction {
+            public override Cat cat { get { return Cat.Plugins; } }
+
             public override string[] documentation { get { return new string[] {
                 "me [chatsound]",
                 "    Plays a chatsound for this player, as if coming from self",
@@ -2730,7 +2747,7 @@ namespace PluginCCS {
 
             }
             void Me(ScriptRunner run, string chatsound) {
-                chatsound = GetFormatted(run, "cs ", chatsound);
+                chatsound = GetFormatted(run, "cs", chatsound);
                 if (chatsound == null) return;
                 run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
             }
@@ -2767,8 +2784,8 @@ namespace PluginCCS {
                 return chatsound;
             }
         }
-
         public class CpeMessage : ScriptAction {
+            public override Cat cat { get { return Cat.Messages; } }
             public override string[] documentation { get { return new string[] {
                 "[cpe message field] <message>",
                 "    same as msg, but allows you to send to the other special chat fields in top right, bottom right, or center.",
@@ -2792,6 +2809,7 @@ namespace PluginCCS {
         }
         public class LocalMessage : ScriptAction {
             const string CPE_CHAT_NAME = "chat";
+            public override Cat cat { get { return Cat.Messages; } }
             public override string[] documentation { get { return new string[] {
                 "[cpe message field] <message>",
                 "    same as cpemsg, but sends to all players in the level similar to death messages and local chat.",
@@ -2827,6 +2845,7 @@ namespace PluginCCS {
             }
         }
         public class MenuMessage : ScriptAction {
+            public override Cat cat { get { return Cat.Messages; } }
             public override string[] documentation { get { return new string[] {
                 "[cpe message field] <message>",
                 "    same as cpemsg for announcements, but stays on the screen instead of disappearing after 5 seconds.",
@@ -2845,8 +2864,8 @@ namespace PluginCCS {
                 run.Error("Invalid cpe message type for {0}", name);
             }
         }
-
         public class Delay : ScriptAction {
+            public override Cat cat { get { return Cat.Basic; } }
             public override string[] documentation { get { return new string[] {
                 "[number or package]",
                 "    Makes the script pause for the amount of milliseconds specified.",
@@ -2860,8 +2879,8 @@ namespace PluginCCS {
                 Thread.Sleep(delay);
             }
         }
-
         public class Jump : ScriptAction {
+            public override Cat cat { get { return Cat.Basic | Cat.Control_Flow; } }
             public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    Makes the script go to the specified label and keep running from there.",
@@ -2879,8 +2898,8 @@ namespace PluginCCS {
                 }
             }
         }
-
         public class Goto : Jump {
+            public override Cat cat { get { return Cat.Control_Flow; } }
             public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    This is the same as jump, but with a big exception:",
@@ -2895,8 +2914,8 @@ namespace PluginCCS {
                 base.Behavior(run);
             }
         }
-
         public class Call : Jump {
+            public override Cat cat { get { return Cat.Basic | Cat.Control_Flow; } }
             public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    Like jump, but once it reaches a \"quit\" in the [#label] called, instead of quitting, it will come back and run what comes after the call.",
@@ -2910,52 +2929,8 @@ namespace PluginCCS {
                 base.Behavior(run);
             }
         }
-
-        public class Quit : ScriptAction {
-            public override string[] documentation { get { return new string[] {
-                "",
-                "    Typically this tells the script to stop running.",
-                "    If we are in a label ran with the \"call\" Action, this causes the script to return to where it was called from.",
-                "    Be careful not to forget this. Without a \"quit\", the script will keep running and do actions from other labels below.",
-            }; } }
-
-            public override string name { get { return "quit"; } }
-
-            public override void Behavior(ScriptRunner run) {
-                if (run.comebackToIndex.Count == 0) { Terminate.Do(run); return; }
-
-                //make the index where it left off
-                run.actionIndex = run.comebackToIndex[run.comebackToIndex.Count - 1];
-                run.comebackToIndex.RemoveAt(run.comebackToIndex.Count - 1);
-
-                if (run.curLine.uses.quitResetsRunArgs) { run.ResetRunArgs(); }
-            }
-        }
-
-        public class Terminate : ScriptAction {
-            public override string[] documentation { get { return new string[] {
-                "",
-                "    This tells the script to stop running completely, even if we are in a nested label that was called from somewhere else using \"call\"",
-            }; } }
-
-            public override string name { get { return "terminate"; } }
-
-            public override void Behavior(ScriptRunner run) {
-                Do(run);
-            }
-            public static void Do(ScriptRunner run) {
-                //make the index at the end so it's completely finished
-                run.actionIndex = run.script.actions.Count;
-                foreach (Thread thread in run.newthreads) {
-                    thread.Join();
-                }
-                //p.Message("Putting thisBool to false and quitting the entire script.");
-                if (!run.repeatable) run.p.Extras[run.thisBool] = false;
-                if (run.allowMBrepeat) { run.p.prevMsg = ""; } //Allow repeat if AllowMBRepeat action was called
-            }
-        }
-
         public class NewThread : ScriptAction {
+            public override Cat cat { get { return Cat.Control_Flow; } }
             public override string[] documentation { get { return new string[] {
                 "[#label]",
                 "    Like call, but allows the script to continue running without taking into account any of the delays in the label you called.",
@@ -2990,8 +2965,52 @@ namespace PluginCCS {
                 run.DoNewThreadRunScript(scriptRunner, newThreadLabel);
             }
         }
+        public class Quit : ScriptAction {
+            public override Cat cat { get { return Cat.Basic | Cat.Control_Flow; } }
+            public override string[] documentation { get { return new string[] {
+                "",
+                "    Typically this tells the script to stop running.",
+                "    If we are in a label ran with the \"call\" Action, this causes the script to return to where it was called from.",
+                "    Be careful not to forget this. Without a \"quit\", the script will keep running and do actions from other labels below.",
+            }; } }
 
+            public override string name { get { return "quit"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.comebackToIndex.Count == 0) { Terminate.Do(run); return; }
+
+                //make the index where it left off
+                run.actionIndex = run.comebackToIndex[run.comebackToIndex.Count - 1];
+                run.comebackToIndex.RemoveAt(run.comebackToIndex.Count - 1);
+
+                if (run.curLine.uses.quitResetsRunArgs) { run.ResetRunArgs(); }
+            }
+        }
+        public class Terminate : ScriptAction {
+            public override Cat cat { get { return Cat.Control_Flow; } }
+            public override string[] documentation { get { return new string[] {
+                "",
+                "    This tells the script to stop running completely, even if we are in a nested label that was called from somewhere else using \"call\"",
+            }; } }
+
+            public override string name { get { return "terminate"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                Do(run);
+            }
+            public static void Do(ScriptRunner run) {
+                //make the index at the end so it's completely finished
+                run.actionIndex = run.script.actions.Count;
+                foreach (Thread thread in run.newthreads) {
+                    thread.Join();
+                }
+                //p.Message("Putting thisBool to false and quitting the entire script.");
+                if (!run.repeatable) run.p.Extras[run.thisBool] = false;
+                if (run.allowMBrepeat) { run.p.prevMsg = ""; } //Allow repeat if AllowMBRepeat action was called
+            }
+        }
         public class Cmd : ScriptAction {
+            public override Cat cat { get { return Cat.Basic; } }
             public override string[] documentation { get { return new string[] {
                 "[command] <command arguments>",
                 "    Runs the given command with the given arguments.",
@@ -3008,8 +3027,8 @@ namespace PluginCCS {
                 run.DoCmd(cmd, run.cmdArgs);
             }
         }
-
         public class Set : ScriptAction {
+            public override Cat cat { get { return Cat.Basic | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [value]",
                 "    Sets the [value] of [package]. If you want to set the value of a package to the value of another package, you have to unwrap it in the value argument with { }.",
@@ -3056,6 +3075,7 @@ namespace PluginCCS {
             protected abstract double Op(double a, double b);
         }
         public class SetAdd : SetMath {
+            public override Cat cat { get { return Cat.Basic | Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Adds the second argument to the first argument.",
@@ -3077,6 +3097,7 @@ namespace PluginCCS {
             }
         }
         public class SetSub : SetMath {
+            public override Cat cat { get { return Cat.Basic | Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Same as setadd, but subtracts.",
@@ -3089,6 +3110,7 @@ namespace PluginCCS {
             }
         }
         public class SetMul : SetMath {
+            public override Cat cat { get { return Cat.Basic | Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Same as setadd, but multiplies.",
@@ -3101,6 +3123,7 @@ namespace PluginCCS {
             }
         }
         public class SetDiv : SetMath {
+            public override Cat cat { get { return Cat.Basic | Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Same as setadd, but divides.",
@@ -3114,6 +3137,7 @@ namespace PluginCCS {
             }
         }
         public class SetMod : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Sets the first argument to the remainder of an integer division between the first argument and the second argument.",
@@ -3131,6 +3155,7 @@ namespace PluginCCS {
             }
         }
         public class SetPow : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Performs a math \"power of\" operation on [package] and sets that as its new value.",
@@ -3144,6 +3169,7 @@ namespace PluginCCS {
             }
         }
         public class SetSin : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates sine of [number or package] and inserts it into [package]",
@@ -3156,6 +3182,7 @@ namespace PluginCCS {
             }
         }
         public class SetCos : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates cosine of [number or package] and inserts it into [package]",
@@ -3168,6 +3195,7 @@ namespace PluginCCS {
             }
         }
         public class SetTan : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates the tangent of [number or package] and inserts it into [package].",
@@ -3181,6 +3209,7 @@ namespace PluginCCS {
             }
         }
         public class SetSqrt : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates the square root of [number or package] and inserts it into [package].",
@@ -3194,6 +3223,7 @@ namespace PluginCCS {
         }
 
         public class SetRandRange : ScriptAction {
+            public override Cat cat { get { return Cat.Random | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package] [number or package]",
                 "    Sets the first argument to a random integer that is within the range of the second and third args.",
@@ -3215,6 +3245,7 @@ namespace PluginCCS {
             }
         }
         public class SetRandRangeDecimal : ScriptAction {
+            public override Cat cat { get { return Cat.Random | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package] [number or package]",
                 "    Sets the first argument to a random number that is within the range of the second and third args.",
@@ -3237,6 +3268,7 @@ namespace PluginCCS {
             }
         }
         public class SetRandList : ScriptAction {
+            public override Cat cat { get { return Cat.Random | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [value1]|[value2]|[value3] etc...",
                 "    Sets the first argument to one of the given values that are separated by the | symbol.",
@@ -3269,6 +3301,7 @@ namespace PluginCCS {
             protected abstract double Op(double value);
         }
         public class SetRound : SetRoundCore {
+            public override Cat cat { get { return Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package]",
                 "    Rounds the value of the package to the nearest integer.",
@@ -3282,6 +3315,7 @@ namespace PluginCCS {
             }
         }
         public class SetRoundUp : SetRoundCore {
+            public override Cat cat { get { return Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package]",
                 "    Rounds the value of the package up to the next integer. For example, 1.1 becomes 2.",
@@ -3294,6 +3328,7 @@ namespace PluginCCS {
             }
         }
         public class SetRoundDown : SetRoundCore {
+            public override Cat cat { get { return Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package]",
                 "    Rounds the value of the package down to the next integer. For example, 1.9 becomes 1.",
@@ -3307,6 +3342,7 @@ namespace PluginCCS {
         }
 
         public class SetFromHexColor : ScriptAction {
+            public override Cat cat { get { return Cat.Colors | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [hexColor]",
                 "    Converts [hexColor] into integer red, green, and blue components such that:",
@@ -3355,6 +3391,7 @@ namespace PluginCCS {
             }
         }
         public class SetToHexColor : ScriptAction {
+            public override Cat cat { get { return Cat.Colors | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [colorStructure]",
                 "    Calculates the hex code based on the given [colorStructure] and inserts it into [package].",
@@ -3392,6 +3429,7 @@ namespace PluginCCS {
         }
 
         public class Show : ScriptAction {
+            public override Cat cat { get { return Cat.Basic | Cat.Messages | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] <another package> <another package> etc...",
                 "    Displays the value of all the packages given, for testing and debug purposes.",
@@ -3438,6 +3476,7 @@ namespace PluginCCS {
         }
 
         public class Kill : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "<message>",
                 "    Kills the player with an optional public death message.",
@@ -3453,6 +3492,7 @@ namespace PluginCCS {
         }
 
         public class ResetData : ScriptAction {
+            public override Cat cat { get { return Cat.Items | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[type] <pattern>",
                 "    Used to reset data.",
@@ -3514,6 +3554,7 @@ namespace PluginCCS {
         }
 
         public class Item : ScriptAction {
+            public override Cat cat { get { return Cat.Items; } }
             public override string[] documentation { get { return new string[] {
                 "[get/take] [ITEM_NAME]",
                 "    Gives an item to the player or takes an item from the player.",
@@ -3532,6 +3573,7 @@ namespace PluginCCS {
         }
 
         public class Freeze : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "",
                 "    Freezes the player in place. They can still fall if mid-air or swim up and down in liquid or ladders, though.",
@@ -3545,6 +3587,7 @@ namespace PluginCCS {
             }
         }
         public class Unfreeze : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "",
                 "    Unfreezes the player.",
@@ -3564,6 +3607,7 @@ namespace PluginCCS {
         }
 
         public class Look : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[block coordinates]",
                 "    Makes the player look at the given coordinates. They can move their camera afterwards.",
@@ -3578,6 +3622,7 @@ namespace PluginCCS {
             }
         }
         public class Stare : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "<block coordinates>",
                 "    Forces the player to continually stare at the given coordinates. You can free their camera by not providing any coordinates to this action.",
@@ -3595,6 +3640,7 @@ namespace PluginCCS {
         }
 
         public class Env : ScriptAction {
+            public override Cat cat { get { return Cat.World; } }
             public override string[] documentation { get { return new string[] {
                 "[property] [value]",
                 "    Temporarily changes env values for the player who runs the script.",
@@ -3622,6 +3668,7 @@ namespace PluginCCS {
         }
 
         public class MOTD : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[motd arguments]",
                 "    Sends an MOTD to the player to control hacks using hacks flags.",
@@ -3647,6 +3694,7 @@ namespace PluginCCS {
         }
 
         public class SetSpawn : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[block coords]",
                 "    Sets the spawn of the player to the coordinates provided.",
@@ -3676,6 +3724,7 @@ namespace PluginCCS {
             }
         }
         public class SetDeathSpawn : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[block coords]",
                 "    Changes where the player will spawn after dying.",
@@ -3710,6 +3759,7 @@ namespace PluginCCS {
             }
         }
         public class AllowMBRepeat : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "",
                 "    Allows the next walk-through MB to be triggered, even if it's the same as the previously touched MB.",
@@ -3723,6 +3773,7 @@ namespace PluginCCS {
         }
 
         public class Reply : ScriptAction {
+            public override Cat cat { get { return Cat.Messages | Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[option number]|[text shown to player]|[#label to call if chosen]",
                 "    Sets up a reply option, which can be chosen by the player by typing [option number] in chat",
@@ -3746,6 +3797,7 @@ namespace PluginCCS {
             }
         }
         public class ReplySilent : ScriptAction {
+            public override Cat cat { get { return Cat.Messages | Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "",
                 "    Identical to reply, with two exceptions:",
@@ -3776,27 +3828,32 @@ namespace PluginCCS {
             protected abstract Command cmd { get; }
         }
         public class TempBlock : CommandShortcut {
+            public override Cat cat { get { return Cat.World; } }
             public override string name { get { return "tempblock"; } }
 
             protected override Command cmd { get { return Core.tempBlockCmd; } }
         }
         public class TempChunk : CommandShortcut {
+            public override Cat cat { get { return Cat.World; } }
             public override string name { get { return "tempchunk"; } }
 
             protected override Command cmd { get { return Core.tempChunkCmd; } }
         }
         public class Boost : CommandShortcut {
+            public override Cat cat { get { return Cat.Player; } }
             public override string name { get { return "boost"; } }
 
             protected override Command cmd { get { return Core.boostCmd; } }
         }
         public class Effect : CommandShortcut {
+            public override Cat cat { get { return Cat.World; } }
             public override string name { get { return "effect"; } }
 
             protected override Command cmd { get { return Core.effectCmd; } }
         }
 
         public class Reach : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[distance]",
                 "    Temporarily sets the player's reach distance, in blocks.",
@@ -3817,6 +3874,7 @@ namespace PluginCCS {
         }
 
         public class SetBlockID : ScriptAction {
+            public override Cat cat { get { return Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [block coordinates]",
                 "    Sets the value of [package] to the ID of the block at the given [block coordinates]",
@@ -3846,6 +3904,7 @@ namespace PluginCCS {
         }
 
         public class DefineHotkey : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[input args]|[key name]|<list of space separated modifiers>",
                 "    This feature allows the player to run the #input label by pressing a key.",
@@ -3893,6 +3952,7 @@ namespace PluginCCS {
             }
         }
         public class UndefineHotkey : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[key name]|<list of space separated modifiers> ",
                 "    This Action compliments definehotkey by allowing you to remove hotkeys.",
@@ -3921,6 +3981,7 @@ namespace PluginCCS {
         }
 
         public class PlaceBlock : ScriptAction {
+            public override Cat cat { get { return Cat.World; } }
             public override string[] documentation { get { return new string[] {
                 "[block] [block coordinates]",
                 "    Used to place blocks in the map.",
@@ -3962,6 +4023,7 @@ namespace PluginCCS {
         }
 
         public class ChangeModel : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "<model>",
                 "    This Action allows you to temporarily change what model people have for the current world.",
@@ -3980,7 +4042,7 @@ namespace PluginCCS {
                 }
                 string[] models = GetLockedModels(run.p.GetMotd());
                 if (models == null) {
-                    //p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
+                    p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
                     return;
                 }
                 //don't let them change twice to same model otherwise revert doesnt work
@@ -4009,6 +4071,7 @@ namespace PluginCCS {
             }
         }
         public class ChangeSkin : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "<skin>",
                 "    This Action allows you to temporarily change what skin someone has for the current world. Other players will be able to see it as well.",
@@ -4040,6 +4103,7 @@ namespace PluginCCS {
         }
 
         public class Award : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[award]",
                 "    Gives the player [award]",
@@ -4054,6 +4118,7 @@ namespace PluginCCS {
         }
 
         public class SetSplit : ScriptAction {
+            public override Cat cat { get { return Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] <splitter>",
                 "    Copies the contents of [package], then splits them up into a new set of packages such that",
@@ -4111,6 +4176,7 @@ namespace PluginCCS {
             }
         }
         public class SetLength : SetSplit {
+            public override Cat cat { get { return Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[package] <splitter>",
                 "    Like setsplit, but just inserts the resulting length into [package].Length",
@@ -4126,6 +4192,7 @@ namespace PluginCCS {
         }
 
         public class SetDirVector : ScriptAction {
+            public override Cat cat { get { return Cat.Math | Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
                 "[xPackage] [yPackage] [zPackage] [yaw number or package] [pitch number or package]",
                 "    Sets the value of x y and z packges to a 3D direction vector based on yaw and pitch in degrees.",
@@ -4220,6 +4287,7 @@ namespace PluginCCS {
             }
         }
         public class ClickEvent : Event {
+            public override Cat cat { get { return Cat.Player_Events; } }
             public override string[] documentation { get { return new string[] {
                 "[async or sync] register [#label]",
                 "    Registers a label that will be called whenever the player clicks.",
@@ -4236,6 +4304,7 @@ namespace PluginCCS {
             public override bool asyncAllowed { get { return true; } }
         }
         public class ChatEvent : Event {
+            public override Cat cat { get { return Cat.Player_Events; } }
             public override string[] documentation { get { return new string[] {
                 "sync register [#cancelLogic] [#onChat] [phrase]|<phrase2>|<etc>",
                 "    This Action is not allowed in os scripts.",
@@ -4279,6 +4348,7 @@ namespace PluginCCS {
             }
         }
         public class Error : ScriptAction {
+            public override Cat cat { get { return Cat.Basic; } }
             public override string[] documentation { get { return new string[] {
                 "[message]",
                 "    Force the script to error with [message] as the reason.",
@@ -4300,6 +4370,7 @@ namespace PluginCCS {
             }
         }
         public class Gui : ScriptAction {
+            public override Cat cat { get { return Cat.Player; } }
             public override string[] documentation { get { return new string[] {
                 "[option] [value]",
                 "    Change properties of the player's gui to achieve cinematic effects.",
@@ -4374,16 +4445,17 @@ namespace PluginCCS {
         }
 
         public class HasPlugin : ScriptAction {
+            public override Cat cat { get { return Cat.Plugins; } }
             public override string[] documentation { get { return new string[] {
                 "[package]|[plugin name]|<version>",
                 "    Checks if the player has [plugin name] and gives [package] a value of true if they have it, otherwise false.",
                 "    <version> is optional. If a version is provided, the plugin must have that version or higher for [package] to be true.",
-                "    For example, to check for chatsounds 1.13 or greater (cs1.13.0):",
-                "-      getplugin hasChatsounds|cs|1.13",
-                "-      if hasChatsounds msg You have chatsounds plugin 1.13 or higher! Welcome.",
+                "    For example, to check for chatsounds 3.13 or greater (cs3.13.0):",
+                "-      hasplugin hasChatsounds|cs|3.13",
+                "-      if hasChatsounds msg You have chatsounds plugin 3.13 or higher! Welcome.",
                 "    Note that the version number is expected to come directly after the plugin name, without spaces.",
                 "    For instance, if you would like to check for the \"Ponies v2.1\" plugin and version, the arguments should be as follows:",
-                "-      getplugin hasPonyPlugin|Ponies v|2.1",
+                "-      hasplugin hasPonyPlugin|Ponies v|2.1",
             }; } }
 
             public override string name { get { return "hasplugin"; } }
