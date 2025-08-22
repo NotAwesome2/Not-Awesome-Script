@@ -597,8 +597,12 @@ namespace PluginCCS {
             }
         }
         public static string NA2WebFileDirectory = "/home/na2/Website-Files/";
+
         public static string NA2WebURL = "https://notawesome.cc/";
 
+        public static string GettingStartedURL = NA2WebURL + "docs/nas/getting-started/";
+        public static string LibDocsURL        = NA2WebURL + "docs/nas/";
+        public static string KeyCodeDocsURL    = NA2WebURL + "docs/nas/keycodes.txt";
 
         public static void MsgDev(string message, params object[] args) {
             Player debugger = PlayerInfo.FindExact(DEBUG_MESSAGE_TARGET); if (debugger == null) { return; }
@@ -1046,7 +1050,7 @@ namespace PluginCCS {
             p.Message("This command is used in adventure map message blocks for extended functionality.");
             p.Message("In order to use this command you need to write and upload a script to your map.");
             p.Message("For more information, please read the guide:");
-            p.Message("https://notawesome.cc/docs/nas/getting-started.txt");
+            p.Message(Core.GettingStartedURL);
         }
     }
     public class CmdOsScript : CmdScript {
@@ -1593,7 +1597,7 @@ namespace PluginCCS {
                 "-           include libs/advlib",
                 "            This is useful because it allows you to use other scripts as a library of reuseable functions.",
                 "            In this example, you'd now be able to call advlib's \"#Text.print\" label from within your script.",
-                "            (docs relating to libs can be found here: https://notawesome.cc/docs/nas/)",
+                "            (docs relating to libs can be found here: "+Core.LibDocsURL+")",
                 "        To include a script from an OS map, use the map named prefixed with \"os/\".",
                 "        For example:",
                 "-           include os/goodlyay+24",
@@ -3910,7 +3914,7 @@ namespace PluginCCS {
                 "    This feature allows the player to run the #input label by pressing a key.",
                 "    [input args] will be sent as an automatic command /input [input args]",
                 "    [key name] must match a key name from the LWJGL keycode specification.",
-                "    You can find the names here: https://notawesome.cc/docs/nas/keycodes.txt",
+                "    You can find the names here: "+Core.KeyCodeDocsURL+"",
                 "    <list of space separated modifiers> is optional and can be any combination of \"ctrl\" \"shift\" \"alt\" and \"async\"",
                 "    async is a unique modifier that doesn't change what keys must be pressed, but allows the input to run repeatedly before the previous input is finished.",
                 "    async will call the label #inputAsync instead of the label #input.",
@@ -4042,7 +4046,7 @@ namespace PluginCCS {
                 }
                 string[] models = GetLockedModels(run.p.GetMotd());
                 if (models == null) {
-                    p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
+                    //run.p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
                     return;
                 }
                 //don't let them change twice to same model otherwise revert doesnt work
@@ -4698,22 +4702,69 @@ namespace PluginCCS {
 
     }
 
-    public static class Docs {
+    public class WebPage {
 
-        static string DateLine() {
-            DateTime date = DateTime.UtcNow;
-            string dateFormatted = date.ToString("yyyy-MM-dd");
-            return "This file was generated from script source code on " + dateFormatted;
-        }
-        static List<string> DescribeSections(List<Section> sections) {
-            List<string> lines = new List<string>();
-            foreach (Section s in sections) {
-                lines.Add("    " + s.Name + " section");
+        const string TAB_NAME = "λTAB_NAME";
+        const string MARKDOWN_CONTENTS = "λMARKDOWN_CONTENTS";
+
+        static string[] template = new string[] {
+            "<!DOCTYPE html>",
+            "<html lang=\"en\">",
+            "  <head>",
+            "    <meta charset=\"UTF-8\" />",
+            "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />",
+            "    <title>"+TAB_NAME+"</title>",
+            "    <style>",
+            "      body {{",
+            "        font-family: Tahoma, Verdana, Arial, sans-serif;",
+            "        color: #cccccc;",
+            "        background-color: #1f1f1f;",
+            "      }}",
+            "      a {{",
+            "        color: #3391ff;",
+            "      }}",
+            "    </style>",
+            "",
+            "    <script type=\"module\" src=\"https://spiralp.github.io/notawesome-website-renderer/index.js\"></script>",
+            "  </head>",
+            "  <body>",
+            "    <pre>",
+            "       "+MARKDOWN_CONTENTS+"",
+            "    </pre>",
+            "  </body>",
+            "</html>",
+        };
+
+        public readonly List<string> contents = new List<string>();
+        public WebPage(string tabName, List<string> markdown) {
+            foreach (string line in template) {
+                if (line.IndexOf('λ') != -1) {
+                    if (line.Contains(TAB_NAME)) {
+                        contents.Add(line.Replace(TAB_NAME, tabName));
+                        continue;
+                    }
+                    if (line.Contains(MARKDOWN_CONTENTS)) {
+                        foreach (string mline in markdown) {
+                            //Need to escape < > I guess
+                            contents.Add(EscapeHTML(mline));
+                        }
+                        continue;
+                    }
+                }
+                contents.Add(line);
             }
-            lines.Add("");
-            lines.Add("");
-            return lines;
         }
+
+        static string EscapeHTML(string text) {
+            return text
+              .Replace("&", "&amp;")
+              .Replace("<", "&lt;")
+              .Replace(">", "&gt;")
+              .Replace("\"", "&quot;")
+              .Replace("'", "&#39;");
+        }
+    }
+    public static class Docs {
         public static void PluginLoad() {
             if (!Core.IsNA2) { return; }
 
@@ -4734,21 +4785,45 @@ namespace PluginCCS {
 
 
             List<string> docs = new List<string>();
+            docs.Add("-```nas");
             docs.Add("Welcome to the documentation for /script and /oss.");
             docs.Add(DateLine());
             docs.Add("");
             docs.Add("Below you will find the following sections:");
             docs.AddRange(DescribeSections(sections));
             foreach (Section section in sections) { docs.AddRange(section.Lines()); }
+            docs.Add("-```");
 
-            Write(docs);
+            Commentify(docs);
+
+            Write(new WebPage("nas documentation", docs).contents);
+        }
+        static string DateLine() {
+            DateTime date = DateTime.UtcNow;
+            string dateFormatted = date.ToString("yyyy-MM-dd");
+            return "This file was generated from script source code on " + dateFormatted;
+        }
+        static List<string> DescribeSections(List<Section> sections) {
+            List<string> lines = new List<string>();
+            foreach (Section s in sections) {
+                lines.Add("    " + s.Name + " section");
+            }
+            lines.Add("");
+            lines.Add("");
+            return lines;
         }
         static void Write(List<string> lines) {
-            string folder = Core.NA2WebFileDirectory + "docs/nas/";
+            string folder = Core.NA2WebFileDirectory + "docs/nas/language/";
             if (!Directory.Exists(folder)) {
                 Directory.CreateDirectory(folder);
             }
 
+            File.WriteAllLines(folder + "documentation.html", lines);
+        }
+        /// <summary>
+        /// Places a comment before every line not beginning with -
+        /// </summary>
+        static void Commentify(List<string> lines) {
             for (int i = 0; i < lines.Count; i++) {
                 if (lines[i].Length == 0) { continue; }
                 if (lines[i][0] == '-') {
@@ -4758,7 +4833,6 @@ namespace PluginCCS {
                 }
                 lines[i] = "// " + lines[i];
             }
-            File.WriteAllLines(folder + "documentation.nas", lines);
         }
 
         public abstract class Section {
@@ -5601,7 +5675,7 @@ namespace PluginCCS {
 
             if (matches != 1) {
                 p.Message("&HYou can find a list of key names here:");
-                p.Message("https://notawesome.cc/docs/nas/keycodes.txt");
+                p.Message(Core.KeyCodeDocsURL);
                 return false;
             }
 
@@ -5632,7 +5706,7 @@ namespace PluginCCS {
         public static int GetKeyCode(Player p, string keyName) {
             int code = 0;
             if (!keyCodes.TryGetValue(keyName.ToUpper(), out code)) {
-                p.Message("&cUnrecognized key name \"{0}\". Please see https://notawesome.cc/docs/nas/keycodes.txt for valid key names.", keyName);
+                p.Message("&cUnrecognized key name \"{0}\". Please see "+Core.KeyCodeDocsURL+" for valid key names.", keyName);
                 p.Message("&bRemember to use the NAME of the key and not a numerical code/value!");
             }
             return code;
