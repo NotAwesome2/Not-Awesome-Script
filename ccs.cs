@@ -2550,19 +2550,19 @@ namespace PluginCCS {
 
         [Flags]
         public enum Cat : int {
-            None          = 0b_0000_0000__0000_0000,
-            Basic         = 0b_0000_0000__0000_0001,
-            Control_Flow  = 0b_0000_0000__0000_0010,
-            Messages      = 0b_0000_0000__0000_0100,
-            Packages      = 0b_0000_0000__0000_1000,
-            Math          = 0b_0000_0000__0001_0000,
-            Random        = 0b_0000_0000__0010_0000,
-            Colors        = 0b_0000_0000__0100_0000,
-            Player        = 0b_0000_0000__1000_0000,
-            Items         = 0b_0000_0001__0000_0000,
-            World         = 0b_0000_0010__0000_0000,
-            Player_Events = 0b_0000_0100__0000_0000,
-            Plugins       = 0b_0000_1000__0000_0000,
+            None          = 0,
+            Basic         = 1 <<  0,
+            Control_Flow  = 1 <<  1,
+            Messages      = 1 <<  2,
+            Packages      = 1 <<  3,
+            Math          = 1 <<  4,
+            Random        = 1 <<  5,
+            Colors        = 1 <<  6,
+            Player        = 1 <<  7,
+            Items         = 1 <<  8,
+            World         = 1 <<  9,
+            Player_Events = 1 << 10,
+            Plugins       = 1 << 11,
         }
 
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
