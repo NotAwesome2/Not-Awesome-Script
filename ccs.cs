@@ -2545,21 +2545,21 @@ namespace PluginCCS {
     public static class ScriptActions {
 
         [Flags]
-        public enum Cat : int {
-            None          = 0b_0000_0000__0000_0000,
-            Basic         = 0b_0000_0000__0000_0001,
-            Control_Flow  = 0b_0000_0000__0000_0010,
-            Messages      = 0b_0000_0000__0000_0100,
-            Packages      = 0b_0000_0000__0000_1000,
-            Math          = 0b_0000_0000__0001_0000,
-            Random        = 0b_0000_0000__0010_0000,
-            Colors        = 0b_0000_0000__0100_0000,
-            Player        = 0b_0000_0000__1000_0000,
-            Items         = 0b_0000_0001__0000_0000,
-            World         = 0b_0000_0010__0000_0000,
-            Player_Events = 0b_0000_0100__0000_0000,
-            Plugins       = 0b_0000_1000__0000_0000,
-        }
+        public enum Cat : int {
+            None          = 0x0000,
+            Basic         = 0x0001,
+            Control_Flow  = 0x0002,
+            Messages      = 0x0004,
+            Packages      = 0x0008,
+            Math          = 0x0010,
+            Random        = 0x0020,
+            Colors        = 0x0040,
+            Player        = 0x0080,
+            Items         = 0x0100,
+            World         = 0x0200,
+            Player_Events = 0x0400,
+            Plugins       = 0x0800,
+        }
 
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
         public static void PluginLoad() {
@@ -4042,7 +4042,7 @@ namespace PluginCCS {
                 }
                 string[] models = GetLockedModels(run.p.GetMotd());
                 if (models == null) {
-                    p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
+                    run.p.Message("&cchangemodel Action is only allowed when you specify model= in map MOTD.");
                     return;
                 }
                 //don't let them change twice to same model otherwise revert doesnt work
