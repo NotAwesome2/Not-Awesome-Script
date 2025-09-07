@@ -1110,11 +1110,13 @@ namespace PluginCCS {
 
             const string Label = "#main";
             try {
-                Script script = new Script(p, "TempScript", new string[] {
-                    Label,
-                    message,
-                    new ScriptActions.Quit().name,
-                });
+                List<string> lines = new List<string> { Label };
+
+                message = message.Replace("; ", ";");
+                lines.AddRange(message.Split(new char[] { ';' }));
+                lines.Add(new ScriptActions.Quit().name);
+
+                Script script = new Script(p, "TempScript", lines.ToArray());
 
                 ScriptRunner run = ScriptRunner.Create(p, level, script, GetPerms(level), data, false, "WhatAreWeDoingHere", new string[] { Label });
                 run.Run(Label, this);
@@ -1127,6 +1129,7 @@ namespace PluginCCS {
             p.Message("&T/{0} <if statement> [action] <action args>", name);
             p.Message("&HRuns a script action.");
             p.Message("&HConvenience command if you just need to run a script action without writing a new script file.");
+            p.Message("&HYou can run multiple lines by splitting the message with the ; character.");
         }
     }
     public class CmdOsScriptAction : CmdScriptAction {
@@ -1583,7 +1586,7 @@ namespace PluginCCS {
                 "-   using "+ALLOW_INCLUDE,
                 "        Allows this script's contents to be included in another script.",
                 "-   using "+LOCAL_PACKAGES,
-                "        Makes packages that are prefixed with \"l_\" treated as local packages",
+                "        Makes packages that are prefixed with \""+LOCAL_PACKAGES_PREFIX+"\" treated as local packages",
                 "        Local packages are unique to every individual instance of script which is running.",
                 "        They always start with blank values and other scripts which are running at the same time cannot interfere with them.",
                 "        Local packages also count newthreads as being separate script instances, so they will not carry over when using newthread action.",
@@ -1609,14 +1612,17 @@ namespace PluginCCS {
 
             const string CEF = "cef";
             const string QUIT_RESETS_RUNARGS = "quit_resets_runargs";
-            public const string LOCAL_PACKAGES = "local_packages";
+            public const string LOCAL_PACKAGES_OLD = "local_packages";
+            public const string LOCAL_PACKAGES = "l-packages";
 
             public bool cef;
             public bool quitResetsRunArgs;
             public bool local_packages;
+            public bool local_packages_old;
 
             public const string ALLOW_INCLUDE = "allow_include";
-            public const string LOCAL_PACKAGES_PREFIX = "l_";
+            public const string LOCAL_PACKAGES_PREFIX_OLD = "l_";
+            public const string LOCAL_PACKAGES_PREFIX = "l-";
 
             public bool ReadLine(string line) {
                 if (!line.StartsWith(PREFIX)) { return false; }
@@ -1624,7 +1630,8 @@ namespace PluginCCS {
 
                 if (line == CEF) { cef = true; }
                 else if (line == QUIT_RESETS_RUNARGS) { quitResetsRunArgs = true; }
-                else if (line == LOCAL_PACKAGES) { local_packages = true; }
+                else if (line == LOCAL_PACKAGES_OLD) { local_packages_old = true; }
+                else if (line == LOCAL_PACKAGES    ) { local_packages     = true; }
 
                 return true;
             }
@@ -2219,6 +2226,16 @@ namespace PluginCCS {
                 return;
             }
 
+
+            if (script.actions[actionIndex].uses.local_packages_old) {
+                p.Message("&cScript error: The using statement \"{0}\" is no longer supported. " +
+                    "Please update it to \"{1}\" and change the prefix of local packages from {2} to {3}.",
+                    Script.Uses.LOCAL_PACKAGES_OLD, Script.Uses.LOCAL_PACKAGES, Script.Uses.LOCAL_PACKAGES_PREFIX_OLD, Script.Uses.LOCAL_PACKAGES_PREFIX
+                    );
+                return;
+            }
+
+
             scriptData.AddActiveScript(this);
 
             CheckClientName();
@@ -2242,7 +2259,6 @@ namespace PluginCCS {
 
                 //RunScriptLines increments actionIndex, but it may also modify it (goto, call, quit)
                 RunScriptLine(script.actions[actionIndex]);
-
 
                 //we need to make sure scriptActions is still in range, because quit from RunScriptLine sets the index to scriptActions.Count
                 if (actionIndex < script.actions.Count) {
@@ -4697,6 +4713,31 @@ namespace PluginCCS {
             public override string desc { get { return "The integer number of how many actions this script can run before it automatically terminates."; } }
             public override string Getter(ScriptRunner run) {
                 return run.perms.actionLimit.ToString();
+            }
+        }
+
+        public class LevelName : ReadOnlyPackage {
+            public override string desc { get { return "The name of the level the player is in."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.startingLevel.name;
+            }
+        }
+        public class LevelX : ReadOnlyPackage {
+            public override string desc { get { return "The width of the level (along x axis) in blocks."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.startingLevel.Width.ToString();
+            }
+        }
+        public class LevelY : ReadOnlyPackage {
+            public override string desc { get { return "The height of the level (along y axis) in blocks."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.startingLevel.Height.ToString();
+            }
+        }
+        public class LevelZ : ReadOnlyPackage {
+            public override string desc { get { return "The length of the level (along z axis) in blocks."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.startingLevel.Length.ToString();
             }
         }
 
