@@ -3228,16 +3228,96 @@ namespace PluginCCS {
                 return Math.Tan(b);
             }
         }
-        public class SetSqrt : SetMath {
+        public class SetArcSin : SetMath {
             public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
-                "    Calculates the square root of [number or package] and inserts it into [package].",
+                "    Calculates the angle whose sine is equal to [number or package].",
+                "    The calculated angle will be in radians.",
             }; } }
+
+            public override string name { get { return "setasin"; } }
+
+            protected override double Op(double a, double b) {
+                return Math.Asin(b);
+            }
+        }
+        public class SetArcCos : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Calculates the angle whose cosine is equal to [number or package].",
+                "    The calculated angle will be in radians.",
+            }; } }
+
+            public override string name { get { return "setacos"; } }
+
+            protected override double Op(double a, double b) {
+                return Math.Acos(b);
+            }
+        }
+        public class SetArcTan : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Calculates the angle whose tangent is equal to [number or package].",
+                "    The calculated angle will be in radians.",
+            }; } }
+
+            public override string name { get { return "setatan"; } }
+
+            protected override double Op(double a, double b) {
+                return Math.Atan(b);
+            }
+        }
+        public class SetDeg : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Converts [number or package] from radians into degrees.",
+            }; } }
+
+            public override string name { get { return "setdeg"; } }
+
+            protected override double Op(double a, double b)
+            {
+                double degrees = (180 / Math.PI) * b;
+                return degrees;
+            }
+        }
+        public class SetRad : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Converts [number or package] from degrees into radians.",
+            }; } }
+
+            public override string name { get { return "setrad"; } }
+
+            protected override double Op(double a, double b)
+            {
+                double radians = (Math.PI / 180) * b;
+                return radians;
+            }
+        }
+        public class SetSqrt : SetMath
+        {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation
+            {
+                get
+                {
+                    return new string[] {
+                "[package] [number or package]",
+                "    Calculates the square root of [number or package] and inserts it into [package].",
+            };
+                }
+            }
 
             public override string name { get { return "setsqrt"; } }
 
-            protected override double Op(double a, double b) {
+            protected override double Op(double a, double b)
+            {
                 return Math.Sqrt(b);
             }
         }
