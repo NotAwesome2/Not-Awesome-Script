@@ -4818,7 +4818,7 @@ namespace PluginCCS {
         {
             public override string desc { get { return "The value of pi."; } }
             public override string Getter(ScriptRunner run){
-                return Math.PI;
+                return Math.PI.ToString();
             }
         }
     }
