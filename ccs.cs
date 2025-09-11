@@ -3300,19 +3300,12 @@ namespace PluginCCS {
                 return radians;
             }
         }
-        public class SetSqrt : SetMath
-        {
+        public class SetSqrt : SetMath {
             public override Cat cat { get { return Cat.Math; } }
-            public override string[] documentation
-            {
-                get
-                {
-                    return new string[] {
+            public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Calculates the square root of [number or package] and inserts it into [package].",
-            };
-                }
-            }
+            }; } }
 
             public override string name { get { return "setsqrt"; } }
 
@@ -4821,6 +4814,13 @@ namespace PluginCCS {
             }
         }
 
+        public class PI : ReadOnlyPackage
+        {
+            public override string desc { get { return "The value of pi."; } }
+            public override string Getter(ScriptRunner run){
+                return Math.PI;
+            }
+        }
     }
 
     public class WebPage {
