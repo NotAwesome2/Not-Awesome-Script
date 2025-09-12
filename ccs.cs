@@ -3236,7 +3236,7 @@ namespace PluginCCS {
                 "    The calculated angle will be in radians.",
             }; } }
 
-            public override string name { get { return "setasin"; } }
+            public override string name { get { return "setarcsin"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Asin(b);
@@ -3250,7 +3250,7 @@ namespace PluginCCS {
                 "    The calculated angle will be in radians.",
             }; } }
 
-            public override string name { get { return "setacos"; } }
+            public override string name { get { return "setarccos"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Acos(b);
@@ -3264,20 +3264,20 @@ namespace PluginCCS {
                 "    The calculated angle will be in radians.",
             }; } }
 
-            public override string name { get { return "setatan"; } }
+            public override string name { get { return "setarctan"; } }
 
             protected override double Op(double a, double b) {
                 return Math.Atan(b);
             }
         }
-        public class SetDeg : SetMath {
+        public class SetDegToRad : SetMath {
             public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Converts [number or package] from radians into degrees.",
             }; } }
 
-            public override string name { get { return "setdeg"; } }
+            public override string name { get { return "setdegtorad"; } }
 
             protected override double Op(double a, double b)
             {
@@ -3285,14 +3285,14 @@ namespace PluginCCS {
                 return degrees;
             }
         }
-        public class SetRad : SetMath {
+        public class SetRadToDeg : SetMath {
             public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
                 "[package] [number or package]",
                 "    Converts [number or package] from degrees into radians.",
             }; } }
 
-            public override string name { get { return "setrad"; } }
+            public override string name { get { return "setradtodeg"; } }
 
             protected override double Op(double a, double b)
             {
