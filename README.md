@@ -26,7 +26,7 @@ To update your server from latest.zip:
 
 Script files (.nas) should be placed in "scripts" folder, and "os" scripts (which can be automatically uploaded by players with /osus) are placed in "scripts/os" folder.
 
-[Documentation for writing .nas files can be found here.](https://notawesome.cc/docs/nas/getting-started.txt)
+[Documentation for writing .nas files can be found here.](https://notawesome.cc/docs/nas/)
 
 ## Player data
 
