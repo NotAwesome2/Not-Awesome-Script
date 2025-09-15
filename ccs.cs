@@ -3228,6 +3228,78 @@ namespace PluginCCS {
                 return Math.Tan(b);
             }
         }
+        public class SetArcSin : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Calculates the angle whose sine is equal to [number or package].",
+                "    The calculated angle will be in radians.",
+            }; } }
+
+            public override string name { get { return "setarcsin"; } }
+
+            protected override double Op(double a, double b) {
+                return Math.Asin(b);
+            }
+        }
+        public class SetArcCos : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Calculates the angle whose cosine is equal to [number or package].",
+                "    The calculated angle will be in radians.",
+            }; } }
+
+            public override string name { get { return "setarccos"; } }
+
+            protected override double Op(double a, double b) {
+                return Math.Acos(b);
+            }
+        }
+        public class SetArcTan : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Calculates the angle whose tangent is equal to [number or package].",
+                "    The calculated angle will be in radians.",
+            }; } }
+
+            public override string name { get { return "setarctan"; } }
+
+            protected override double Op(double a, double b) {
+                return Math.Atan(b);
+            }
+        }
+        public class SetRadToDeg : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Converts [number or package] from radians into degrees.",
+            }; } }
+
+            public override string name { get { return "setradtodeg"; } }
+
+            protected override double Op(double a, double b)
+            {
+                double degrees = (180 / Math.PI) * b;
+                return degrees;
+            }
+        }
+        public class SetDegToRad : SetMath {
+            public override Cat cat { get { return Cat.Math; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [number or package]",
+                "    Converts [number or package] from degrees into radians.",
+            }; } }
+
+            public override string name { get { return "setdegtorad"; } }
+
+            protected override double Op(double a, double b)
+            {
+                double radians = (Math.PI / 180) * b;
+                return radians;
+            }
+        }
         public class SetSqrt : SetMath {
             public override Cat cat { get { return Cat.Math; } }
             public override string[] documentation { get { return new string[] {
@@ -4741,6 +4813,13 @@ namespace PluginCCS {
             }
         }
 
+        public class PI : ReadOnlyPackage
+        {
+            public override string desc { get { return "The value of pi."; } }
+            public override string Getter(ScriptRunner run){
+                return Math.PI.ToString();
+            }
+        }
     }
 
     public class WebPage {
