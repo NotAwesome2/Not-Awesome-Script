@@ -672,9 +672,16 @@ namespace PluginCCS {
             "Allows OS scripts read and write permanently saved data."
         };
 
+        public const string multiPlayerProp = "script_multiplayer";
+        static string[] multiPlayerPropDesc = new string[] {
+            "[true/false]",
+            "If true, multiplayer features are enabled in scripting."
+        };
+
         public override void Load(bool startup) {
             ExtraLevelProps.ExtraLevelProps.Register(name, inputProp, LevelPermission.Operator, inputPropDesc, null);
             ExtraLevelProps.ExtraLevelProps.Register(name, savePlayerScriptDataProp, LevelPermission.Operator, savePlayerScriptDataPropDesc, ExtraLevelProps.ExtraLevelProps.OnPropChangingBool);
+            ExtraLevelProps.ExtraLevelProps.Register(name, multiPlayerProp, LevelPermission.Operator, multiPlayerPropDesc, ExtraLevelProps.ExtraLevelProps.OnPropChangingBool);
 
             Script.PluginLoad();
             ScriptActions.PluginLoad();
@@ -731,6 +738,7 @@ namespace PluginCCS {
         public override void Unload(bool shutdown) {
             ExtraLevelProps.ExtraLevelProps.Unregister(inputProp);
             ExtraLevelProps.ExtraLevelProps.Unregister(savePlayerScriptDataProp);
+            ExtraLevelProps.ExtraLevelProps.Unregister(multiPlayerProp);
 
             PersistentAnnouncements.PluginUnload();
 
@@ -1406,10 +1414,11 @@ namespace PluginCCS {
                 if (uses.ReadLine(line)) { continue; }
 
                 if (line.StartsWith("include")) {
-                    if (includedPaths == null) {
-                        CompileError(p, scriptName, lineNumber, "This script does not support include");
-                        return false;
-                    }
+                    //Should be fine, this was a hack fix for bad includedPaths setup for scriptaction
+                    //if (includedPaths == null) {
+                    //    CompileError(p, scriptName, lineNumber, "This script does not support include");
+                    //    return false;
+                    //}
                     string[] bits = line.SplitSpaces();
                     if (bits.Length != 2) {
                         CompileError(p, scriptName, lineNumber, "Include statement only accepts one argument which is the script to be included.");
@@ -1605,10 +1614,12 @@ namespace PluginCCS {
         /// <summary>
         /// Simple Script constructor to initialise from code.
         /// Exceptions: ArgumentException will be thrown if a compilation error occurs.
-        /// The error will be displayed to the player.
+        /// The error should be displayed to the player.
         /// </summary>
         public Script(Player p, string name, string[] contents) : this (name) {
+            includedPaths = new List<string>();
             if (!AddFile(p, this.name, contents)) throw new ArgumentException();
+            includedPaths = null;
         }
         public readonly string name;
         private DateTime compileDate;
@@ -1788,6 +1799,7 @@ namespace PluginCCS {
         public readonly int actionLimit;
         public readonly int recursiveThreadLimit;
         public readonly int newThreadLimit;
+        public readonly bool multiPlayer;
 
         const int newThreadLimitNormal = 16;
         const int newThreadLimitMax = 64;
@@ -1802,6 +1814,9 @@ namespace PluginCCS {
             actionLimit = staffPermission ? actionsMax : actionsNormal;
             recursiveThreadLimit = staffPermission ? recursiveThreadLimitMax : recursiveThreadLimitNormal;
             newThreadLimit = staffPermission ? newThreadLimitMax : newThreadLimitNormal;
+
+            //Ehhhhh ?? ?
+            //multiPlayer = lvl.GetExtraPropBool(Core.multiPlayerProp);
         }
         /// <summary>
         /// Generates the appropriate non-staff permissions for the given level. E.g. may allow saving via extra level prop
@@ -1812,6 +1827,8 @@ namespace PluginCCS {
             actionLimit = staffPermission ? actionsMax : actionsNormal;
             recursiveThreadLimit = staffPermission ? recursiveThreadLimitMax : recursiveThreadLimitNormal;
             newThreadLimit = staffPermission ? newThreadLimitMax : newThreadLimitNormal;
+
+            multiPlayer = lvl.GetExtraPropBool(Core.multiPlayerProp);
         }
     }
 
@@ -4367,6 +4384,7 @@ namespace PluginCCS {
                 "    This Action allows you to temporarily change what model people have for the current world.",
                 "    Run this Action with no arguments to set the player's model back to what it was before.",
                 "    This Action only works if the MOTD of the level has one or more models forced with model=[something]",
+                "    The model given does not need to be in the MOTD.",
             }; } }
 
             public override string name { get { return "changemodel"; } }
@@ -4542,7 +4560,7 @@ namespace PluginCCS {
                 "    - a quote-enclosed literal phrase or word in which spaces are allowed. The characters inside the quotes are compared.",
                 "    For example",
                 "-       setsimilarity sim runArg1 curPassword",
-                "-       setsimilarity sim runArg1 \"Thanks spiders\"",
+                "-       setsimilarity sim runArg1 \"Thanks spiders 10\"",
                 "-       setsimilarity sim \"test 1\" \"test 2\"",
             }; } }
 
