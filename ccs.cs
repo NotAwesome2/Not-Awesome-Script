@@ -1935,71 +1935,6 @@ namespace PluginCCS {
             lock (rndLocker) { return entries[rnd.Next(entries.Length)]; }
         }
 
-        static byte? GetEnvColorType(string type) {
-            if (type.CaselessEq("sky"))       { return 0; }
-            if (type.CaselessEq("cloud"))     { return 1; }
-            if (type.CaselessEq("clouds"))    { return 1; }
-            if (type.CaselessEq("fog"))       { return 2; }
-            if (type.CaselessEq("shadow"))    { return 3; }
-            if (type.CaselessEq("sun"))       { return 4; }
-            if (type.CaselessEq("skybox"))    { return 5; }
-            if (type.CaselessEq("lavalight")) { return 6; }
-            if (type.CaselessEq("lamplight")) { return 7; }
-            return null;
-        }
-        static byte? GetEnvWeatherType(string type) {
-            if (type.CaselessEq("sun"))  { return 0; }
-            if (type.CaselessEq("rain")) { return 1; }
-            if (type.CaselessEq("snow")) { return 2; }
-            return null;
-        }
-        static EnvProp? GetEnvMapProperty(string prop) {
-            if (prop.CaselessEq("maxfog")) { return EnvProp.MaxFog; }
-            if (prop.CaselessEq("expfog")) { return EnvProp.ExpFog; }
-            if (prop.CaselessEq("cloudsheight") || prop.CaselessEq("cloudheight")) { return EnvProp.CloudsLevel; }
-            if (prop.CaselessEq("cloudspeed") || prop.CaselessEq("cloudspeed")) { return EnvProp.CloudsSpeed; }
-            return null;
-        }
-        public void SetEnv(string message) {
-            if (message.Length == 0) { Error("No args provided for env"); return; }
-            string[] args = message.SplitSpaces(2);
-            if (args.Length < 2) { Error("You must provide an argument for type of env property to change as well as value"); return; }
-            string prop = args[0];
-            string valueString = args[1];
-            byte? type = GetEnvColorType(prop);
-            if (type != null) {
-                p.Session.SendSetEnvColor((byte)type, valueString);
-                return;
-            }
-            if (prop.CaselessEq("weather")) {
-                type = GetEnvWeatherType(valueString);
-                if (type != null) { p.Session.SendSetWeather((byte)type); return; }
-                Error("Env weather type \"{0}\" is not currently supported.", valueString);
-                return;
-            }
-
-            EnvProp? envPropType = GetEnvMapProperty(prop);
-            if (envPropType != null) {
-                if (envPropType == EnvProp.ExpFog) {
-                    bool yesno = false;
-                    if (CommandParser.GetBool(p, valueString, ref yesno)) {
-                        p.Send(Packet.EnvMapProperty((EnvProp)envPropType, yesno ? 1 : 0));
-                    }
-                    return;
-                }
-                int value = 0;
-
-                if (CommandParser.GetInt(p, valueString, "env int value", ref value)) {
-                    if (envPropType == EnvProp.CloudsSpeed) { value *= 256; }
-                    p.Send(Packet.EnvMapProperty((EnvProp)envPropType, value));
-                }
-                return;
-            }
-
-
-            Error("Env property \"{0}\" is not currently supported.", prop);
-        }
-
 
         public bool ValidateCommand(out Command cmd) {
             cmd = null;
@@ -3854,12 +3789,85 @@ namespace PluginCCS {
                 "        weather [sun/rain/snow]",
                 "        maxfog [distance in blocks]",
                 "        expfog [on/off]",
+                "env reset",
+                "    Resets all values back to default for the level or zone the player is in.",
             }; } }
 
             public override string name { get { return "env"; } }
-
             public override void Behavior(ScriptRunner run) {
-                run.SetEnv(run.args);
+                string message = run.args;
+                Player p = run.p;
+                if (message.CaselessEq("reset")) {
+                    p.SendCurrentEnv();
+                    return;
+                }
+
+                if (message.Length == 0) { run.Error("No args provided for env"); return; }
+                string[] args = message.SplitSpaces(2);
+                if (args.Length < 2) { run.Error("You must provide an argument for type of env property to change as well as value"); return; }
+                string prop = args[0];
+                string valueString = args[1];
+                byte? type = GetEnvColorType(prop);
+                if (type != null) {
+                    p.Session.SendSetEnvColor((byte)type, valueString);
+                    return;
+                }
+                if (prop.CaselessEq("weather")) {
+                    type = GetEnvWeatherType(valueString);
+                    if (type != null) { p.Session.SendSetWeather((byte)type); return; }
+                    run.Error("Env weather type \"{0}\" is not currently supported.", valueString);
+                    return;
+                }
+
+                EnvProp? envPropType = GetEnvMapProperty(prop);
+                if (envPropType != null) {
+                    if (envPropType == EnvProp.ExpFog) {
+                        bool yesno = false;
+                        if (CommandParser.GetBool(p, valueString, ref yesno)) {
+                            p.Send(Packet.EnvMapProperty((EnvProp)envPropType, yesno ? 1 : 0));
+                        } else {
+                            run.ErrorAbove();
+                        }
+                        return;
+                    }
+                    int value = 0;
+
+                    if (CommandParser.GetInt(p, valueString, "env int value", ref value)) {
+                        if (envPropType == EnvProp.CloudsSpeed) { value *= 256; }
+                        p.Send(Packet.EnvMapProperty((EnvProp)envPropType, value));
+                    } else {
+                        run.ErrorAbove();
+                    }
+                    return;
+                }
+
+
+                run.Error("Env property \"{0}\" is not currently supported.", prop);
+            }
+            static byte? GetEnvColorType(string type) {
+                if (type.CaselessEq("sky")) { return 0; }
+                if (type.CaselessEq("cloud")) { return 1; }
+                if (type.CaselessEq("clouds")) { return 1; }
+                if (type.CaselessEq("fog")) { return 2; }
+                if (type.CaselessEq("shadow")) { return 3; }
+                if (type.CaselessEq("sun")) { return 4; }
+                if (type.CaselessEq("skybox")) { return 5; }
+                if (type.CaselessEq("lavalight")) { return 6; }
+                if (type.CaselessEq("lamplight")) { return 7; }
+                return null;
+            }
+            static byte? GetEnvWeatherType(string type) {
+                if (type.CaselessEq("sun")) { return 0; }
+                if (type.CaselessEq("rain")) { return 1; }
+                if (type.CaselessEq("snow")) { return 2; }
+                return null;
+            }
+            static EnvProp? GetEnvMapProperty(string prop) {
+                if (prop.CaselessEq("maxfog")) { return EnvProp.MaxFog; }
+                if (prop.CaselessEq("expfog")) { return EnvProp.ExpFog; }
+                if (prop.CaselessEq("cloudsheight") || prop.CaselessEq("cloudheight")) { return EnvProp.CloudsLevel; }
+                if (prop.CaselessEq("cloudspeed") || prop.CaselessEq("cloudspeed")) { return EnvProp.CloudsSpeed; }
+                return null;
             }
         }
 
