@@ -721,6 +721,7 @@ namespace PluginCCS {
             OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
             OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
             OnPlayerSpawningEvent.Register(OnPlayerSpawning, Priority.High);
+            OnChangedZoneEvent.Register(OnChangedZone, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
             OnLevelUnloadEvent.Register(OnLevelUnload, Priority.Low);
             OnPlayerChatEvent.Register(OnPlayerChat, Priority.High);
@@ -761,6 +762,7 @@ namespace PluginCCS {
             OnJoinedLevelEvent.Unregister(OnJoinedLevel);
             OnJoiningLevelEvent.Unregister(OnJoiningLevel);
             OnPlayerSpawningEvent.Unregister(OnPlayerSpawning);
+            OnChangedZoneEvent.Unregister(OnChangedZone);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
             OnPlayerChatEvent.Unregister(OnPlayerChat);
             OnPlayerCommandEvent.Unregister(OnPlayerCommand);
@@ -844,6 +846,10 @@ namespace PluginCCS {
 
             //Perform the #onJoin label for this level if it exists
             ScriptRunner.PerformOnJoin(p, p.level);
+        }
+        static void OnChangedZone(Player p) {
+            //Perform the #onChangedZone label if it exists
+            ScriptRunner.PerformOnChangedZone(p);
         }
         static void OnInfoSwap(string source, string dest) {
             string sourcePath = ScriptData.savePath + source;
@@ -2113,8 +2119,9 @@ namespace PluginCCS {
         public const string ASYNC_LABEL = "#inputAsync";
         const string LABEL_ON_EXIT = "#onExit";
         const string LABEL_ON_JOIN = "#onJoin";
+        const string LABEL_ON_CHANGED_ZONE = "#onChangedZone";
         const string ACCESS_CONTROL = "#accessControl";
-        readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, ACCESS_CONTROL };
+        readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, LABEL_ON_CHANGED_ZONE, ACCESS_CONTROL };
         
 
         /// <summary>
@@ -2208,7 +2215,27 @@ namespace PluginCCS {
             //Run on new thread to prevent "lagging" the player from script actions/delays.
             PerformScriptOnNewThread(p, level, scriptName, LABEL_ON_JOIN, perms, false, CommandData());
         }
+        /// <summary>
+        /// Tries to perform #onChangedZone for the given level on a new thread
+        /// </summary>
+        public static void PerformOnChangedZone(Player p) {
+            string filepath;
+            string scriptName;
+            RunnerPerms perms;
 
+            if (Script.IsOs(p.level)) {
+                scriptName = Script.OS_PREFIX + p.level.name;
+                perms = new RunnerPerms(p.level);
+            } else {
+                scriptName = p.level.name;
+                perms = RunnerPerms.Staff;
+            }
+            filepath = Script.FullPath(scriptName);
+            if (!File.Exists(filepath)) { return; }
+
+            //Run on new thread to prevent "lagging" the player from script actions/delays.
+            PerformScriptOnNewThread(p, p.level, scriptName, LABEL_ON_CHANGED_ZONE, perms, false, CommandData());
+        }
         /// <summary>
         /// For use in CmdScriptAction. Is there a better way to do this?
         /// </summary>
@@ -5050,7 +5077,6 @@ namespace PluginCCS {
                 return run.p.Session.appName == null ? "" : run.p.Session.appName;
             }
         }
-
         public class msgDelay : ReadOnlyPackage {
             public override string desc { get { return "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had."; } }
             public override string Getter(ScriptRunner run) {
@@ -5065,7 +5091,18 @@ namespace PluginCCS {
                 return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
             }
         }
-
+        public class zone : ReadOnlyPackage {
+            public override string desc { get { return "The name of the zone the player is currently in. If the player is not in a zone, the string is empty."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.p.ZoneIn != null ? run.p.ZoneIn.Config.Name : "";
+            }
+        }
+        public class zoneMotd : ReadOnlyPackage {
+            public override string desc { get { return "The MOTD of the zone the player is currently in. Similarly to tempblock and tempchunk, this is the original MOTD. If the player is not in a zone, the map MOTD is read."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.p.ZoneIn != null ? run.p.ZoneIn.Config.MOTD : run.p.level.Config.MOTD;
+            }
+        }
         public class cef : ReadOnlyPackage {
             public override string desc { get { return "Has a value of \"true\" if the player has cef installed (https://github.com/SpiralP/classicube-cef-loader-plugin)"; } }
             public override string Getter(ScriptRunner run) {
@@ -5429,7 +5466,12 @@ namespace PluginCCS {
                 "    This only works for staff scripts.",
                 "    When the player leaves a map, this label will be run automatically.",
                 "    It will run while the player is in the new map, after packages are reset.",
-                "    It will also run if the player disconnects from the server while on a map utilising it.",            
+                "    It will also run if the player disconnects from the server while on a map utilising it.",
+                "",
+                "#onChangedZone",
+                "   Once the player joins a zone (/help os plot) this label will be run automatically.",
+                "   It will also run when the player leaves a zone, as the map itself is considered to be a zone with an empty name.",
+                "   Because of that, the label will be run automatically once the player joins the map. Usually, it happens before #onJoin."
             };
 
             public override List<string> Body() {
