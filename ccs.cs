@@ -721,6 +721,7 @@ namespace PluginCCS {
             OnJoinedLevelEvent.Register(OnJoinedLevel, Priority.High);
             OnJoiningLevelEvent.Register(OnJoiningLevel, Priority.High);
             OnPlayerSpawningEvent.Register(OnPlayerSpawning, Priority.High);
+            OnChangedZoneEvent.Register(OnChangedZone, Priority.High);
             OnLevelRenamedEvent.Register(OnLevelRenamed, Priority.Low);
             OnLevelUnloadEvent.Register(OnLevelUnload, Priority.Low);
             OnPlayerChatEvent.Register(OnPlayerChat, Priority.High);
@@ -761,6 +762,7 @@ namespace PluginCCS {
             OnJoinedLevelEvent.Unregister(OnJoinedLevel);
             OnJoiningLevelEvent.Unregister(OnJoiningLevel);
             OnPlayerSpawningEvent.Unregister(OnPlayerSpawning);
+            OnChangedZoneEvent.Unregister(OnChangedZone);
             OnLevelRenamedEvent.Unregister(OnLevelRenamed);
             OnPlayerChatEvent.Unregister(OnPlayerChat);
             OnPlayerCommandEvent.Unregister(OnPlayerCommand);
@@ -815,6 +817,8 @@ namespace PluginCCS {
             ScriptRunner.PerformOnExit(p, prevLevel);
         }
         public static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
+            ScriptRunner.hasRunOnJoin = false; // This is because OnJoiningLevel runs before OnChangedZone (Except when the player logs into the server into main for some reason)
+
             if (ScriptRunner.PerformAccessControl(p, lvl.name)) {
                 canJoin = false;
                 lvl.AutoUnload();
@@ -843,7 +847,14 @@ namespace PluginCCS {
             }
 
             //Perform the #onJoin label for this level if it exists
+            ScriptRunner.hasRunOnJoin = true;
             ScriptRunner.PerformOnJoin(p, p.level);
+        }
+        static void OnChangedZone(Player p) {
+            if (!ScriptRunner.hasRunOnJoin) { return; } // This is to prevent it from running when a player joins a new map.
+            
+            //Perform the #onChangedZone label if it exists
+            ScriptRunner.PerformOnChangedZone(p);
         }
         static void OnInfoSwap(string source, string dest) {
             string sourcePath = ScriptData.savePath + source;
@@ -1876,6 +1887,8 @@ namespace PluginCCS {
         public bool repeatable;
         public bool allowMBrepeat;
         public string thisBool;
+        public readonly object delayThread = new();
+        public static bool hasRunOnJoin = false;
 
         public CommandData cmdData;
         public ClickInfo clickInfo = null;
@@ -2113,8 +2126,9 @@ namespace PluginCCS {
         public const string ASYNC_LABEL = "#inputAsync";
         const string LABEL_ON_EXIT = "#onExit";
         const string LABEL_ON_JOIN = "#onJoin";
+        const string LABEL_ON_CHANGED_ZONE = "#onChangedZone";
         const string ACCESS_CONTROL = "#accessControl";
-        readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, ACCESS_CONTROL };
+        readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, LABEL_ON_CHANGED_ZONE, ACCESS_CONTROL };
         
 
         /// <summary>
@@ -2208,7 +2222,27 @@ namespace PluginCCS {
             //Run on new thread to prevent "lagging" the player from script actions/delays.
             PerformScriptOnNewThread(p, level, scriptName, LABEL_ON_JOIN, perms, false, CommandData());
         }
+        /// <summary>
+        /// Tries to perform #onChangedZone for the given level on a new thread
+        /// </summary>
+        public static void PerformOnChangedZone(Player p) {
+            string filepath;
+            string scriptName;
+            RunnerPerms perms;
 
+            if (Script.IsOs(p.level)) {
+                scriptName = Script.OS_PREFIX + p.level.name;
+                perms = new RunnerPerms(p.level);
+            } else {
+                scriptName = p.level.name;
+                perms = RunnerPerms.Staff;
+            }
+            filepath = Script.FullPath(scriptName);
+            if (!File.Exists(filepath)) { return; }
+
+            //Run on new thread to prevent "lagging" the player from script actions/delays.
+            PerformScriptOnNewThread(p, p.level, scriptName, LABEL_ON_CHANGED_ZONE, perms, false, CommandData());
+        }
         /// <summary>
         /// For use in CmdScriptAction. Is there a better way to do this?
         /// </summary>
@@ -2935,7 +2969,14 @@ namespace PluginCCS {
             public override void Behavior(ScriptRunner run) {
                 int delay;
                 if (!GetIntRawOrVal(run, run.cmdName, out delay)) { return; }
-                Thread.Sleep(delay);
+                //Thread.Sleep(delay);
+                
+                // Instead of just sleeping the thread, we keep track of it with a monitor so that we can reactivate it when needed
+                // We can do this because the thread is not doing anything, so monitoring it gives us more control
+                lock (run.delayThread) {
+                    if (run.cancelled) { return; }
+                    Monitor.Wait(run.delayThread, TimeSpan.FromMilliseconds(delay));
+                }
             }
         }
         public class Jump : ScriptAction {
@@ -4091,6 +4132,13 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces(4);
+
+                run.p.Message("SetBlockID:");
+
+                for (int i = 0; i < bits.Length; i++){
+                    run.p.Message(bits[i]);
+                }
+
                 if (bits.Length < 4) {
                     run.Error("You need to specify a package and x y z coordinates of the block to retrieve the ID of.");
                     return;
@@ -4131,6 +4179,45 @@ namespace PluginCCS {
                 }
                 if (message == null) { message = ""; }
                 run.SetString(packageName, message);
+            }
+        }
+
+        public class SetZoneMOTD : ScriptAction {
+            public override Cat cat { get { return Cat.Packages; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [zone name]",
+                "    Sets the value of [package] to the to the MOTD of the zone with name [zone name]",
+                "    IMPORTANT: this action does *not* see MOTD changes caused by motd!",
+                "    It only gets the MOTD of the zone that was there in the original map.",
+                "    Leaving the second argument empty will give you the MOTD of the level instead.",
+            }; } }
+
+            public override string name { get { return "setzonemotd"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                string[] bits = run.args.SplitSpaces();
+                if (bits.Length > 2) {
+                    run.Error("You only need to specify a package and the name of the zone to retrieve the MOTD of. Usage: setzonemotd [package] [zone name]");
+                    return;
+                }
+                string packageName = bits[0];
+                if (packageName == "") {
+                    run.Error("You need to specify a package and the name of the zone to retrieve the MOTD of. Usage: setzonemotd [package] [zone name]");
+                    return;
+                }
+                if (bits.Length == 1) {
+                    run.SetString(packageName, run.p.level.Config.MOTD != "ignore" ? run.p.level.Config.MOTD : "");
+                    return;
+                }
+                string zoneName = bits[1];
+                Zone[] zones = run.p.level.Zones.Items;
+                for (int i = 0; i < zones.Length; i++) {
+                    if (zones[i].Config.Name == zoneName) {
+                        run.SetString(packageName, zones[i].Config.MOTD != "ignore" ? zones[i].Config.MOTD : "");
+                        return;
+                    }
+                }
+                run.Error("Unknown zone \"" + zoneName + "\".");
             }
         }
 
@@ -5050,7 +5137,6 @@ namespace PluginCCS {
                 return run.p.Session.appName == null ? "" : run.p.Session.appName;
             }
         }
-
         public class msgDelay : ReadOnlyPackage {
             public override string desc { get { return "A number used for the delay Action that is automatically scaled based on how many characters the previous msg Action had."; } }
             public override string Getter(ScriptRunner run) {
@@ -5065,7 +5151,19 @@ namespace PluginCCS {
                 return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
             }
         }
-
+        public class zone : ReadOnlyPackage {
+            public override string desc { get { return "The name of the zone the player is currently in. If the player is not in a zone, the string is empty."; } }
+            public override string Getter(ScriptRunner run) {
+                return run.p.ZoneIn != null ? run.p.ZoneIn.Config.Name : "";
+            }
+        }
+        public class zoneMotd : ReadOnlyPackage {
+            public override string desc { get { return "The MOTD of the zone the player is currently in. Similarly to tempblock and tempchunk, this is the original MOTD. If the player is not in a zone, the map MOTD is read."; } }
+            public override string Getter(ScriptRunner run) {
+                string motd = run.p.ZoneIn != null ? run.p.ZoneIn.Config.MOTD : run.p.level.Config.MOTD;
+                return motd != "ignore" ? motd : "";
+            }
+        }
         public class cef : ReadOnlyPackage {
             public override string desc { get { return "Has a value of \"true\" if the player has cef installed (https://github.com/SpiralP/classicube-cef-loader-plugin)"; } }
             public override string Getter(ScriptRunner run) {
@@ -5429,7 +5527,11 @@ namespace PluginCCS {
                 "    This only works for staff scripts.",
                 "    When the player leaves a map, this label will be run automatically.",
                 "    It will run while the player is in the new map, after packages are reset.",
-                "    It will also run if the player disconnects from the server while on a map utilising it.",            
+                "    It will also run if the player disconnects from the server while on a map utilising it.",
+                "",
+                "#onChangedZone",
+                "   Once the player joins a zone (/help os plot) this label will be run automatically.",
+                "   It will also run when the player leaves a zone, as the map itself is considered to be a zone with an empty name.",
             };
 
             public override List<string> Body() {
@@ -5723,11 +5825,13 @@ namespace PluginCCS {
 
             lock (activeScriptsLocker) {
                 for (int i = activeScripts.Count - 1; i >= 0; i--) {
-                    activeScripts[i].cancelled = true;
-                    activeScripts.Remove(activeScripts[i]);
+                    lock (activeScripts[i].delayThread) {
+                        activeScripts[i].cancelled = true;
+                        Monitor.Pulse(activeScripts[i].delayThread); // Stops ongoing delay
+                        activeScripts.Remove(activeScripts[i]);
+                    }
                 }
             }
-
 
             if (debugging) p.Message("Script debugging mode is now &cfalse&S.");
             debugging = false;
@@ -6581,7 +6685,7 @@ namespace PluginCCS {
     public static class NumberParser {
 
         static NumberStyles intStyle = NumberStyles.AllowLeadingSign;
-        static NumberStyles doubleStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
+        static NumberStyles doubleStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent;
         public static bool TryParseInt(string arg, out int value) {
             return Int32.TryParse(arg, intStyle, CultureInfo.InvariantCulture, out value);
         }
