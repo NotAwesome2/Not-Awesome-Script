@@ -817,8 +817,6 @@ namespace PluginCCS {
             ScriptRunner.PerformOnExit(p, prevLevel);
         }
         public static void OnJoiningLevel(Player p, Level lvl, ref bool canJoin) {
-            ScriptRunner.hasRunOnJoin = false; // This is because OnJoiningLevel runs before OnChangedZone (Except when the player logs into the server into main for some reason)
-
             if (ScriptRunner.PerformAccessControl(p, lvl.name)) {
                 canJoin = false;
                 lvl.AutoUnload();
@@ -847,14 +845,26 @@ namespace PluginCCS {
             }
 
             //Perform the #onJoin label for this level if it exists
-            ScriptRunner.hasRunOnJoin = true;
             ScriptRunner.PerformOnJoin(p, p.level);
         }
         static void OnChangedZone(Player p) {
-            if (!ScriptRunner.hasRunOnJoin) { return; } // This is to prevent it from running when a player joins a new map.
-            
-            //Perform the #onChangedZone label if it exists
-            ScriptRunner.PerformOnChangedZone(p);
+            ScriptData scriptData = GetScriptData(p);
+            if (scriptData.zoneChangedEvents.async == null) { return; }
+            Sevent sevent = scriptData.zoneChangedEvents.async;
+            if (sevent.level != p.level) return;
+
+            string labelAndArgs;
+            if (p.ZoneIn != null) {
+                labelAndArgs = sevent.scriptLabel + '|' + p.ZoneIn.Config.Name.Replace(ScriptRunner.runArgSpaceSubstitute, ScriptRunner.runArgUnderscorePreserver);
+            } else {
+                labelAndArgs = sevent.scriptLabel;
+            }
+            CommandData data = sevent.GetCommandData(p.Pos.FeetBlockCoords);
+
+            ScriptRunner.PerformScriptOnNewThread(
+                p, p.level, sevent.scriptName,
+                labelAndArgs,
+                sevent.perms, true, data);
         }
         static void OnInfoSwap(string source, string dest) {
             string sourcePath = ScriptData.savePath + source;
@@ -956,7 +966,8 @@ namespace PluginCCS {
         }
         static void DoClick(Player p, Sevent sevent, Vec3S32 coords, ClickInfo clickInfo) {
             if (sevent == null) { return; }
-            ScriptRunner.PerformScriptOnNewThread(p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, sevent.async,
+            bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async;
+            ScriptRunner.PerformScriptOnNewThread(p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable,
                 sevent.GetCommandData(coords),
                 clickInfo);
         }
@@ -1887,8 +1898,7 @@ namespace PluginCCS {
         public bool repeatable;
         public bool allowMBrepeat;
         public string thisBool;
-        public readonly object delayThread = new();
-        public static bool hasRunOnJoin = false;
+        public readonly object delayThread = new object();
 
         public CommandData cmdData;
         public ClickInfo clickInfo = null;
@@ -2077,11 +2087,17 @@ namespace PluginCCS {
             runArgs = (string[])newRunArgs.Clone();
             runArgs[0] = originalStartLabel;
         }
-        static string runArgSpaceSubstitute = "_";
+
+        public static string runArgSpaceSubstitute = "_";
+        /// <summary>
+        /// If you need to include underscores in your runargs when performing script from code, you can replace them with this (em dash) and they will be converted to underscores in a final step
+        /// </summary>
+        public static string runArgUnderscorePreserver = "—";
         public static void ReplaceUnderScoreWithSpaceInRunArgs(ref string[] runArgs) {
             for (int i = 0; i < runArgs.Length; i++) {
                 if (i == 0) { continue; } //do not replace underscores with spaces in startLabel which is always runArgs[0]
                 runArgs[i] = runArgs[i].Replace(runArgSpaceSubstitute, " ");
+                runArgs[i] = runArgs[i].Replace(runArgUnderscorePreserver, runArgSpaceSubstitute);
             }
         }
 
@@ -2126,9 +2142,8 @@ namespace PluginCCS {
         public const string ASYNC_LABEL = "#inputAsync";
         const string LABEL_ON_EXIT = "#onExit";
         const string LABEL_ON_JOIN = "#onJoin";
-        const string LABEL_ON_CHANGED_ZONE = "#onChangedZone";
         const string ACCESS_CONTROL = "#accessControl";
-        readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, LABEL_ON_CHANGED_ZONE, ACCESS_CONTROL };
+        readonly static string[] silentLabels = { LABEL_ON_EXIT, LABEL_ON_JOIN, ACCESS_CONTROL };
         
 
         /// <summary>
@@ -2222,27 +2237,7 @@ namespace PluginCCS {
             //Run on new thread to prevent "lagging" the player from script actions/delays.
             PerformScriptOnNewThread(p, level, scriptName, LABEL_ON_JOIN, perms, false, CommandData());
         }
-        /// <summary>
-        /// Tries to perform #onChangedZone for the given level on a new thread
-        /// </summary>
-        public static void PerformOnChangedZone(Player p) {
-            string filepath;
-            string scriptName;
-            RunnerPerms perms;
 
-            if (Script.IsOs(p.level)) {
-                scriptName = Script.OS_PREFIX + p.level.name;
-                perms = new RunnerPerms(p.level);
-            } else {
-                scriptName = p.level.name;
-                perms = RunnerPerms.Staff;
-            }
-            filepath = Script.FullPath(scriptName);
-            if (!File.Exists(filepath)) { return; }
-
-            //Run on new thread to prevent "lagging" the player from script actions/delays.
-            PerformScriptOnNewThread(p, p.level, scriptName, LABEL_ON_CHANGED_ZONE, perms, false, CommandData());
-        }
         /// <summary>
         /// For use in CmdScriptAction. Is there a better way to do this?
         /// </summary>
@@ -4132,13 +4127,6 @@ namespace PluginCCS {
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces(4);
-
-                run.p.Message("SetBlockID:");
-
-                for (int i = 0; i < bits.Length; i++){
-                    run.p.Message(bits[i]);
-                }
-
                 if (bits.Length < 4) {
                     run.Error("You need to specify a package and x y z coordinates of the block to retrieve the ID of.");
                     return;
@@ -4182,17 +4170,17 @@ namespace PluginCCS {
             }
         }
 
-        public class SetZoneMOTD : ScriptAction {
+        public class GetZoneMOTD : ScriptAction {
             public override Cat cat { get { return Cat.Packages; } }
             public override string[] documentation { get { return new string[] {
-                "[package] [zone name]",
+                "[package] <zone name>",
                 "    Sets the value of [package] to the to the MOTD of the zone with name [zone name]",
                 "    IMPORTANT: this action does *not* see MOTD changes caused by motd!",
                 "    It only gets the MOTD of the zone that was there in the original map.",
                 "    Leaving the second argument empty will give you the MOTD of the level instead.",
             }; } }
 
-            public override string name { get { return "setzonemotd"; } }
+            public override string name { get { return "getzonemotd"; } }
 
             public override void Behavior(ScriptRunner run) {
                 string[] bits = run.args.SplitSpaces();
@@ -4205,7 +4193,7 @@ namespace PluginCCS {
                     run.Error("You need to specify a package and the name of the zone to retrieve the MOTD of. Usage: setzonemotd [package] [zone name]");
                     return;
                 }
-                if (bits.Length == 1) {
+                if (bits.Length == 1 || bits[1].Length == 0) {
                     run.SetString(packageName, run.p.level.Config.MOTD != "ignore" ? run.p.level.Config.MOTD : "");
                     return;
                 }
@@ -4720,11 +4708,10 @@ namespace PluginCCS {
         }
         public abstract class Event : ScriptAction {
             public override string[] documentation { get { throw new MemberAccessException(); } }
-
             public override string name { get { throw new MemberAccessException(); } }
 
             protected abstract SevGroup GetSevGroup(ScriptRunner run);
-            public abstract bool asyncAllowed { get; }
+            public abstract Sevent.ThreadingType allowedThreadingTypes { get; }
             public virtual bool osAllowed { get { return true; } }
             public override void Behavior(ScriptRunner run) {
                 if (!osAllowed && !run.perms.staffPermission) {
@@ -4737,16 +4724,16 @@ namespace PluginCCS {
                     return;
                 }
 
-                bool async;
+                Sevent.ThreadingType async;
                 if (args[0] == "sync") {
-                    async = false;
+                    async = Sevent.ThreadingType.Sync;
                 } else if (args[0] == "async") {
-                    async = true;
+                    async = Sevent.ThreadingType.Async;
                 } else {
                     run.Error("The first argument for {0} must be either \"sync\" or \"async\".", name);
                     return;
                 }
-                if (!asyncAllowed && async) { run.Error("async is not available for {0}", name); return; }
+                if ((allowedThreadingTypes & async) == 0) { run.Error("async is not available for {0}", name); return; }
 
                 string func = args[1];
 
@@ -4761,7 +4748,7 @@ namespace PluginCCS {
                     object arg = null;
                     if (!ParseArg(run, stringArg, ref arg)) { return; }
 
-                    Sevent sevent = new Sevent(run.perms, run.scriptName, label, async, arg);
+                    Sevent sevent = new Sevent(run.startingLevel, run.perms, run.scriptName, label, async, arg);
                     GetSevGroup(run).Register(sevent, async);
                     return;
                 }
@@ -4786,11 +4773,14 @@ namespace PluginCCS {
                 "    To get information about the player click, see the Click Label section.",
                 "clickevent [async or sync] unregister",
                 "    Unregisteres the previously registered [label] for async or sync.",
+                "    ---",
+                "    IMPORTANT: Only one sync and async label may be registered at a time",
+                "    Repeating the Action will simply replace whatever label may have been registered before.",
             }; } }
 
             public override string name { get { return "clickevent"; } }
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.clickEvents; }
-            public override bool asyncAllowed { get { return true; } }
+            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Both; } }
         }
         public class ChatEvent : Event {
             public override Cat cat { get { return Cat.Player_Events; } }
@@ -4808,12 +4798,15 @@ namespace PluginCCS {
                 "    For example, passing phrases foo|bar will give runArg2 for how much the message matches foo and runArg3 for matches bar.",
                 "chatevent sync unregister",
                 "    Unregisters the previously registered chat event.",
+                "    ---",
+                "    IMPORTANT: Only one label may be registered at a time",
+                "    Repeating the Action will simply replace whatever label may have been registered before.",
             }; } }
 
             public override string name { get { return "chatevent"; } }
 
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.chatEvents; }
-            public override bool asyncAllowed { get { return false; } }
+            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Sync; } }
             public override bool osAllowed { get { return false; } }
             protected override bool ParseArg(ScriptRunner run, string stringArg, ref object arg) {
                 try {
@@ -4835,6 +4828,23 @@ namespace PluginCCS {
                     phrases = args[1].Split(ScriptRunner.pipeChar);
                 }
             }
+        }
+        public class ZoneChangedEvent : Event {
+            public override Cat cat { get { return Cat.Player_Events; } }
+            public override string[] documentation { get { return new string[] {
+                "async register [#label]",
+                "    Registers a label that will be called whenever the player changes zones (/help os plot).",
+                "    runArg1 will be given the name of the zone that the player has newly entered",
+                "zonechangedevent async unregister",
+                "    Unregisteres the previously registered [label].",
+                "    ---",
+                "    IMPORTANT: Only one label may be registered at a time",
+                "    Repeating the Action will simply replace whatever label may have been registered before.",
+            }; } }
+
+            public override string name { get { return "zonechangedevent"; } }
+            protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.zoneChangedEvents; }
+            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Async; } }
         }
         public class Error : ScriptAction {
             public override Cat cat { get { return Cat.Basic; } }
@@ -5528,10 +5538,6 @@ namespace PluginCCS {
                 "    When the player leaves a map, this label will be run automatically.",
                 "    It will run while the player is in the new map, after packages are reset.",
                 "    It will also run if the player disconnects from the server while on a map utilising it.",
-                "",
-                "#onChangedZone",
-                "   Once the player joins a zone (/help os plot) this label will be run automatically.",
-                "   It will also run when the player leaves a zone, as the map itself is considered to be a zone with an empty name.",
             };
 
             public override List<string> Body() {
@@ -5638,20 +5644,35 @@ namespace PluginCCS {
     /// ScriptEvent
     /// </summary>
     public class Sevent {
+        [Flags]
+        public enum ThreadingType : int {
+            Sync  = 1 <<  0,
+            Async = 1 <<  1,
+            Both  = Sync | Async
+        }
+
+        /// <summary>
+        /// The level this event was registered in
+        /// </summary>
+        public readonly Level level;
         public readonly RunnerPerms perms;
         /// <summary>
         /// What you would pass to Script.Get e.g. os/goodlyay+24 or shrine
         /// </summary>
         public readonly string scriptName;
         public readonly string scriptLabel;
-        public readonly bool async;
+        public readonly ThreadingType threadingType;
         public readonly object arg;
 
-        public Sevent(RunnerPerms perms, string scriptName, string scriptLabel, bool async, object arg = null) {
+        public Sevent(Level level, RunnerPerms perms, string scriptName, string scriptLabel, ThreadingType threadingType, object arg = null) {
+            this.level = level;
             this.perms = perms;
             this.scriptName = scriptName;
             this.scriptLabel = scriptLabel;
-            this.async = async;
+            if (threadingType == ThreadingType.Both) {
+                throw new ArgumentException("Any given Sevent may only be one threading type (passed type \"" + threadingType + "\")");
+            }
+            this.threadingType = threadingType;
             this.arg = arg;
         }
 
@@ -5669,12 +5690,12 @@ namespace PluginCCS {
         public SevGroup() { }
 
         public bool active { get { return async != null || sync != null; } }
-        public void Register(Sevent sevent, bool isAsync) {
-            if (isAsync) { async = sevent; } else { sync = sevent; }
+        public void Register(Sevent sevent, Sevent.ThreadingType threadingType) {
+            if (threadingType == Sevent.ThreadingType.Async) { async = sevent; } else { sync = sevent; }
         }
 
-        public void Unregister(bool isAsync) {
-            if (isAsync) { async = null; } else { sync = null; }
+        public void Unregister(Sevent.ThreadingType threadingType) {
+            if (threadingType == Sevent.ThreadingType.Async) { async = null; } else { sync = null; }
         }
         public void Reset() {
             async = null;
@@ -5733,6 +5754,7 @@ namespace PluginCCS {
 
         public SevGroup clickEvents = new SevGroup();
         public SevGroup chatEvents = new SevGroup();
+        public SevGroup zoneChangedEvents = new SevGroup();
 
 
         public string prevModel = null;
@@ -5839,6 +5861,7 @@ namespace PluginCCS {
 
             clickEvents.Reset();
             chatEvents.Reset();
+            zoneChangedEvents.Reset();
             persistentAnnouncements.Clear();
 
             ResetReplies();
