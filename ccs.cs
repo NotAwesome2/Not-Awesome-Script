@@ -2801,7 +2801,7 @@ namespace PluginCCS {
                     Pos(run, coords, cs, localBroadcast);
                     return;
                 }
-                if (func == "bot" && !localBroadcast) {
+                if (func == "bot") {
                     string[] bits = run.cmdArgs.SplitSpaces(2);
                     if (bits.Length != 2) {
                         run.Error("Not enough arguments provided for chatsound bot Action");
@@ -2821,7 +2821,7 @@ namespace PluginCCS {
                             try {
                                 PlayerBot b = tBots[i];
                                 if (!b.name.CaselessEq(botName)) continue;
-                                Bot(run, b, cs);
+                                Bot(run, b, cs, localBroadcast);
                             } catch {
                                 //In case a thread-related error occurs
                                 break;
@@ -2832,7 +2832,7 @@ namespace PluginCCS {
                     PlayerBot[] levelBots = run.p.level.Bots.Items;
                     foreach (PlayerBot b in levelBots) {
                         if (!b.name.CaselessEq(botName)) continue;
-                        Bot(run, b, cs);
+                        Bot(run, b, cs, localBroadcast);
                     }
 
                     return;
@@ -2899,14 +2899,29 @@ namespace PluginCCS {
                     SendChatsound(run.p, chatsound);
                 }
             }
-            void Bot(ScriptRunner run, PlayerBot b, string chatsound) {
-                byte ID;
-                if (!run.p.EntityList.GetID(b, out ID)) return;
-                string prefix = "csent " + ID;
-                chatsound = GetFormatted(run, prefix, chatsound);
-                if (chatsound == null) return;
+            void Bot(ScriptRunner run, PlayerBot b, string chatsound, bool localBroadcast) {
+                if (localBroadcast) {
+                    Player[] players = PlayerInfo.Online.Items;
+                    foreach (Player pl in players) {
+                        if (!Chat.FilterLevel(pl, run.startingLevel)) continue;
+                        if (Chat.Ignoring(pl, run.p)) continue;
 
-                SendChatsound(run.p, chatsound);
+                        byte ID;
+                        if (!pl.EntityList.GetID(b, out ID)) continue;
+                        string sourcedChatsound = GetFormatted(run, "csent " + ID, chatsound);
+                        if (sourcedChatsound == null) continue;
+
+                        SendChatsound(pl, sourcedChatsound);
+                    }
+                } else {
+                    byte ID;
+                    if (!run.p.EntityList.GetID(b, out ID)) return;
+                    string prefix = "csent " + ID;
+                    chatsound = GetFormatted(run, prefix, chatsound);
+                    if (chatsound == null) return;
+
+                    SendChatsound(run.p, chatsound);
+                }
             }
 
             string GetFormatted(ScriptRunner run, string prefix, string chatsound) {
@@ -2928,6 +2943,8 @@ namespace PluginCCS {
                 "    Plays a chatsound for all players in the level, as if coming from this player",
                 "localcs pos [block coords] [chatsound]",
                 "    Plays a chatsound for all players in the level, as if coming from the given coordinates.",
+                "localcs bot [botName] [chatsound]",
+                "    Plays a chatsound for all players in the level, as if coming from the given bot or tempbot.",
             }; } }
 
             public override string name { get { return "localcs"; } }
