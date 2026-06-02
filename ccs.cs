@@ -2768,7 +2768,10 @@ namespace PluginCCS {
 
             static Version minCsVersion = new Version("3.13");
             public override void Behavior(ScriptRunner run) {
-                if (!HasPlugin._HasPlugin(run, "cs", minCsVersion)) return;
+                ProcessChatsound(run, false);
+            }
+            protected void ProcessChatsound(ScriptRunner run, bool localBroadcast) {
+                // if (!HasPlugin._HasPlugin(run, "cs", minCsVersion)) return;
 
                 string func = run.cmdName.ToLower();
                 if (run.cmdArgs == "") {
@@ -2776,8 +2779,12 @@ namespace PluginCCS {
                     return;
                 }
 
+                if (func == "all" && localBroadcast) {
+                    All(run, run.cmdArgs);
+                    return;
+                }
                 if (func == "me") {
-                    Me(run, run.cmdArgs);
+                    Me(run, run.cmdArgs, localBroadcast);
                     return;
                 }
                 if (func == "pos") {
@@ -2791,10 +2798,10 @@ namespace PluginCCS {
 
                     Vec3F32 coords;
                     if (!GetCoordsFloat(run, sCoords, out coords)) return;
-                    Pos(run, coords, cs);
+                    Pos(run, coords, cs, localBroadcast);
                     return;
                 }
-                if (func == "bot") {
+                if (func == "bot" && !localBroadcast) {
                     string[] bits = run.cmdArgs.SplitSpaces(2);
                     if (bits.Length != 2) {
                         run.Error("Not enough arguments provided for chatsound bot Action");
@@ -2834,12 +2841,43 @@ namespace PluginCCS {
                 run.Error("Unknown argument {0} for chatsound Action", func);
 
             }
-            void Me(ScriptRunner run, string chatsound) {
+            void SendChatsound(Player p, string chatsound) {
+                if (!HasPlugin._HasPlugin(p, "cs", minCsVersion)) return;
+                p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+            }
+            void All(ScriptRunner run, string chatsound) {
                 chatsound = GetFormatted(run, "cs", chatsound);
                 if (chatsound == null) return;
-                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+
+                Player[] players = PlayerInfo.Online.Items;
+                foreach (Player pl in players) {
+                    if (!Chat.FilterLevel(pl, run.startingLevel)) continue;
+                    if (Chat.Ignoring(pl, run.p)) continue;
+
+                    SendChatsound(pl, chatsound);
+                }
             }
-            void Pos(ScriptRunner run, Vec3F32 pos, string chatsound) {
+            void Me(ScriptRunner run, string chatsound, bool localBroadcast) {
+                if (localBroadcast) {
+                    Player[] players = PlayerInfo.Online.Items;
+                    foreach (Player pl in players) {
+                        if (!Chat.FilterLevel(pl, run.startingLevel)) continue;
+                        if (Chat.Ignoring(pl, run.p)) continue;
+                        if (pl == run.p) continue;
+
+                        byte ID;
+                        if (!pl.EntityList.GetID(run.p, out ID)) continue;
+                        string sourcedChatsound = GetFormatted(run, "csent " + ID, chatsound);
+                        if (sourcedChatsound == null) continue;
+
+                        SendChatsound(pl, sourcedChatsound);
+                    }
+                }
+                chatsound = GetFormatted(run, "cs", chatsound);
+                if (chatsound == null) return;
+                SendChatsound(run.p, chatsound);
+            }
+            void Pos(ScriptRunner run, Vec3F32 pos, string chatsound, bool localBroadcast) {
                 //Rounding cuts down on characters and the precision lost doesn't matter much for sound position
                 string prefix = String.Format("cspos {0} {1} {2}",
                     Math.Round(pos.X, 1),
@@ -2849,7 +2887,17 @@ namespace PluginCCS {
                 chatsound = GetFormatted(run, prefix, chatsound);
                 if (chatsound == null) return;
 
-                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+                if (localBroadcast) {
+                    Player[] players = PlayerInfo.Online.Items;
+                    foreach (Player pl in players) {
+                        if (!Chat.FilterLevel(pl, run.startingLevel)) continue;
+                        if (Chat.Ignoring(pl, run.p)) continue;
+
+                        SendChatsound(pl, chatsound);
+                    }
+                } else {
+                    SendChatsound(run.p, chatsound);
+                }
             }
             void Bot(ScriptRunner run, PlayerBot b, string chatsound) {
                 byte ID;
@@ -2858,7 +2906,7 @@ namespace PluginCCS {
                 chatsound = GetFormatted(run, prefix, chatsound);
                 if (chatsound == null) return;
 
-                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+                SendChatsound(run.p, chatsound);
             }
 
             string GetFormatted(ScriptRunner run, string prefix, string chatsound) {
@@ -2870,6 +2918,22 @@ namespace PluginCCS {
                 }
 
                 return chatsound;
+            }
+        }
+        public class LocalChatsound : Chatsound {
+            public override string[] documentation { get { return new string[] {
+                "all [chatsound]",
+                "    Plays a chatsound for all players in the level, similar to that of login/logout sounds",
+                "localcs me [chatsound]",
+                "    Plays a chatsound for all players in the level, as if coming from this player",
+                "localcs pos [block coords] [chatsound]",
+                "    Plays a chatsound for all players in the level, as if coming from the given coordinates.",
+            }; } }
+
+            public override string name { get { return "localcs"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                ProcessChatsound(run, true);
             }
         }
         public class CpeMessage : ScriptAction {
@@ -4959,8 +5023,8 @@ namespace PluginCCS {
 
             public override string name { get { return "hasplugin"; } }
 
-            public static bool _HasPlugin(ScriptRunner run, string plugin, Version minimum = null) {
-                string app = run.p.Session.appName;
+            public static bool _HasPlugin(Player p, string plugin, Version minimum = null) {
+                string app = p.Session.appName;
                 //app = run.GetString("testclient");
 
                 if (app == null) return false;
@@ -5002,7 +5066,7 @@ namespace PluginCCS {
                     }
                 }
 
-                bool result = _HasPlugin(run, pluginName, minVersion);
+                bool result = _HasPlugin(run.p, pluginName, minVersion);
                 run.SetString(outBooleanPackageName, result ? "true" : "false");
             }
         }
