@@ -2755,7 +2755,7 @@ namespace PluginCCS {
 
             public override string[] documentation { get { return new string[] {
                 "me [chatsound]",
-                "    Plays a chatsound for this player, as if coming from self",
+                "    Plays a chatsound for this player, as if coming from self.",
                 "    The player must have chatsounds plugin v3.13 or newer to hear sounds from cs Actions.",
                 "    https://github.com/SpiralP/classicube-chatsounds-plugin",
                 "cs pos [block coords] [chatsound]",
@@ -2766,80 +2766,70 @@ namespace PluginCCS {
 
             public override string name { get { return "cs"; } }
 
+            protected virtual string InMyHeadArg { get { return "me"; } }
+            /// <summary>
+            /// Player(s) who can actually hear the sound
+            /// </summary>
+            List<Player> GetTargets(ScriptRunner run) {
+                return Listeners(run)
+                    .Where((p) => HasPlugin._HasPlugin(p, "cs", minCsVersion))
+                    .ToList();
+            }
+            /// <summary>
+            /// Player(s) who could potentially hear the sound
+            /// </summary>
+            protected virtual List<Player> Listeners(ScriptRunner run) { return new List<Player> { run.p }; }
+
             static Version minCsVersion = new Version("3.13");
             public override void Behavior(ScriptRunner run) {
-                if (!HasPlugin._HasPlugin(run, "cs", minCsVersion)) return;
-
-                string func = run.cmdName.ToLower();
                 if (run.cmdArgs == "") {
                     run.Error("Not enough arguments provided for chatsound Action");
                     return;
                 }
 
-                if (func == "me") {
+                string func = run.cmdName.ToLower();
+                if (_Behavior(run, func)) return;
+
+                run.Error("Unknown argument {0} for chatsound Action", func);
+            }
+            protected virtual bool _Behavior(ScriptRunner run, string func) {
+                if (func == InMyHeadArg) {
                     Me(run, run.cmdArgs);
-                    return;
+                    return true;
                 }
                 if (func == "pos") {
-                    string[] bits = run.cmdArgs.SplitSpaces(4);
-                    if (bits.Length != 4) {
-                        run.Error("Not enough arguments provided for chatsound pos Action");
-                        return;
-                    }
-                    string sCoords = String.Format("{0} {1} {2}", bits[0], bits[1], bits[2]);
-                    string cs = bits[3];
-
-                    Vec3F32 coords;
-                    if (!GetCoordsFloat(run, sCoords, out coords)) return;
-                    Pos(run, coords, cs);
-                    return;
+                    Pos(run);
+                    return true;
                 }
                 if (func == "bot") {
                     string[] bits = run.cmdArgs.SplitSpaces(2);
                     if (bits.Length != 2) {
-                        run.Error("Not enough arguments provided for chatsound bot Action");
-                        return;
+                        run.Error("Not enough arguments provided for {0} bot Action", name);
+                        return true;
                     }
                     string botName = bits[0];
-                    string cs = bits[1];
-
-
-                    object o;
-                    if (run.p.Extras.TryGet("TempBot_BotList", out o)) {
-                        //Player's current Tempbots, shared and used by CustomModels plugin
-                        List<PlayerBot> tBots = (List<PlayerBot>)o;
-
-                        for (int i = 0; i < tBots.Count; i++) {
-                            if (i >= tBots.Count) { break; } //The list may change length while we're iterating
-                            try {
-                                PlayerBot b = tBots[i];
-                                if (!b.name.CaselessEq(botName)) continue;
-                                Bot(run, b, cs);
-                            } catch {
-                                //In case a thread-related error occurs
-                                break;
-                            }
-                        }
-                    }
-
-                    PlayerBot[] levelBots = run.p.level.Bots.Items;
-                    foreach (PlayerBot b in levelBots) {
-                        if (!b.name.CaselessEq(botName)) continue;
-                        Bot(run, b, cs);
-                    }
-
-                    return;
+                    string chatsound = bits[1];
+                    Entity(run, botName, chatsound, GetBot);
+                    return true;
                 }
-
-                run.Error("Unknown argument {0} for chatsound Action", func);
-
+                return false;
             }
             void Me(ScriptRunner run, string chatsound) {
                 chatsound = GetFormatted(run, "cs", chatsound);
                 if (chatsound == null) return;
-                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+                GetTargets(run).ForEach((p) => p.Session.SendMessage(CpeMessageType.Normal, chatsound));
             }
-            void Pos(ScriptRunner run, Vec3F32 pos, string chatsound) {
+            void Pos(ScriptRunner run) {
+                string[] bits = run.cmdArgs.SplitSpaces(4);
+                if (bits.Length != 4) {
+                    run.Error("Not enough arguments provided for {0} pos Action", name);
+                    return;
+                }
+                string sCoords = String.Format("{0} {1} {2}", bits[0], bits[1], bits[2]);
+                string chatsound = bits[3];
+                Vec3F32 pos;
+                if (!GetCoordsFloat(run, sCoords, out pos)) return;
+
                 //Rounding cuts down on characters and the precision lost doesn't matter much for sound position
                 string prefix = String.Format("cspos {0} {1} {2}",
                     Math.Round(pos.X, 1),
@@ -2849,16 +2839,63 @@ namespace PluginCCS {
                 chatsound = GetFormatted(run, prefix, chatsound);
                 if (chatsound == null) return;
 
-                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+                GetTargets(run).ForEach((p) => p.Session.SendMessage(CpeMessageType.Normal, chatsound));
             }
-            void Bot(ScriptRunner run, PlayerBot b, string chatsound) {
-                byte ID;
-                if (!run.p.EntityList.GetID(b, out ID)) return;
-                string prefix = "csent " + ID;
-                chatsound = GetFormatted(run, prefix, chatsound);
-                if (chatsound == null) return;
+            protected void Entity(ScriptRunner run, string targetArg, string chatsound, Func<Player, string, Entity> GetEntity) {
 
-                run.p.Session.SendMessage(CpeMessageType.Normal, chatsound);
+                List<Player> players = GetTargets(run);
+                foreach (Player p in players) {
+                    Entity e = GetEntity(p, targetArg);
+                    if (e == null) {
+                        //p.Message("FAILED to play a chatsound to you: Could not find entity \"{0}\" to play from",
+                        //    string.IsNullOrEmpty(targetArg) ? "null" : targetArg);
+                        continue;
+                    }
+                    byte ID;
+                    if (e == p) {
+                        ID = Entities.SelfID;
+                    } else {
+                        if (!p.EntityList.GetID(e, out ID)) {
+                            //if (e is Player ePlayer) 
+                            //    p.Message("FAILED to play a chatsound to you: Could not find entity ID for {0}", p.FormatNick(ePlayer.name));
+                            //if (e is PlayerBot eBot) {
+                            //    p.Message("FAILED to play a chatsound to you: Could not find entity ID for bot {0}", eBot.DisplayName);
+                            //}
+                            continue;
+                        }
+                    }
+                    string prefix = "csent " + ID;
+                    string formattedChatsound = GetFormatted(run, prefix, chatsound);
+                    if (formattedChatsound == null) continue;
+
+                    p.Session.SendMessage(CpeMessageType.Normal, formattedChatsound);
+                }
+            }
+            PlayerBot GetBot(Player p, string botName) {
+                object o;
+                if (p.Extras.TryGet("TempBot_BotList", out o)) {
+                    //Player's current Tempbots, shared and used by CustomModels plugin
+                    List<PlayerBot> tBots = (List<PlayerBot>)o;
+
+                    for (int i = 0; i < tBots.Count; i++) {
+                        if (i >= tBots.Count) { break; } //The list may change length while we're iterating
+                        try {
+                            PlayerBot b = tBots[i];
+                            if (!b.name.CaselessEq(botName)) continue;
+                            return b;
+                        } catch {
+                            //In case a thread-related error occurs
+                            break;
+                        }
+                    }
+                }
+
+                PlayerBot[] levelBots = p.level.Bots.Items;
+                foreach (PlayerBot b in levelBots) {
+                    if (!b.name.CaselessEq(botName)) continue;
+                    return b;
+                }
+                return null;
             }
 
             string GetFormatted(ScriptRunner run, string prefix, string chatsound) {
@@ -2870,6 +2907,46 @@ namespace PluginCCS {
                 }
 
                 return chatsound;
+            }
+        }
+        public class LocalChatsound : Chatsound {
+            public override string[] documentation { get { return new string[] {
+                "all [chatsound]",
+                "    Plays a chatsound for everyone in the level, as if coming from themselves",
+                "    The player(s) must have chatsounds plugin v3.13 or newer to hear sounds from cs Actions.",
+                "    https://github.com/SpiralP/classicube-chatsounds-plugin",
+                "localcs pos [block coords] [chatsound]",
+                "    Plays a chatsound for everyone in the level, as if coming from the given coordinates.",
+                "localcs bot [botName] [chatsound]",
+                "    Plays a chatsound for everyone in the level, as if coming from the given bot or tempbot.",
+                "localcs me [chatsound]",
+                "    Plays a chatsound for everyone in the level, as if coming from the player who triggered the script.",
+            }; } }
+
+            public override string name { get { return "localcs"; } }
+
+            protected override string InMyHeadArg { get { return "all"; } }
+            /// <summary>
+            /// Player(s) who could potentially hear the sound
+            /// </summary>
+            protected override List<Player> Listeners(ScriptRunner run) {
+                Player[] players = PlayerInfo.Online.Items;
+                List<Player> listeners = new List<Player>();
+
+                foreach (Player pl in players) {
+                    if (!Chat.FilterLevel(pl, run.startingLevel)) continue;
+                    if (Chat.Ignoring(pl, run.p)) continue;
+                    if (!run.p.CanSee(pl)) continue;
+                    listeners.Add(pl);
+                }
+                return listeners;
+            }
+            protected override bool _Behavior(ScriptRunner run, string func) {
+                if (func == "me") {
+                    Entity(run, null, run.cmdArgs, (p, _) => run.p);
+                    return true;
+                }
+                return base._Behavior(run, func);
             }
         }
         public class CpeMessage : ScriptAction {
@@ -4959,8 +5036,8 @@ namespace PluginCCS {
 
             public override string name { get { return "hasplugin"; } }
 
-            public static bool _HasPlugin(ScriptRunner run, string plugin, Version minimum = null) {
-                string app = run.p.Session.appName;
+            public static bool _HasPlugin(Player p, string plugin, Version minimum = null) {
+                string app = p.Session.appName;
                 //app = run.GetString("testclient");
 
                 if (app == null) return false;
@@ -5002,7 +5079,7 @@ namespace PluginCCS {
                     }
                 }
 
-                bool result = _HasPlugin(run, pluginName, minVersion);
+                bool result = _HasPlugin(run.p, pluginName, minVersion);
                 run.SetString(outBooleanPackageName, result ? "true" : "false");
             }
         }
