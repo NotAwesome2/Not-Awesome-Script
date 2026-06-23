@@ -623,7 +623,7 @@ namespace PluginCCS {
 
         private static Dictionary<string, ScriptData> scriptDataAtPlayer = new Dictionary<string, ScriptData>();
         public static ScriptData GetScriptData(Player p) {
-            lock (scriptDataLocker) { //only one thread should access this at a time
+            lock (scriptDataLocker) {
                 ScriptData sd;
                 if (scriptDataAtPlayer.TryGetValue(p.name, out sd)) { return sd; } else {
                     //throw new System.Exception("Tried to get script data for "+p.name+" but there was NOTHING there");
@@ -631,6 +631,30 @@ namespace PluginCCS {
                     scriptDataAtPlayer[p.name] = new ScriptData(p);
                     return scriptDataAtPlayer[p.name];
                 }
+            }
+        }
+        /// <summary>
+        /// Retrieve package data from Script for an online or offline player
+        /// </summary>
+        public static string GetData(string playerName, string stringName, RunnerPerms perms, string scriptName) {
+            lock (scriptDataLocker) {
+                ScriptData sd;
+                if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
+                    return sd.GetString(stringName, perms, scriptName);
+                }
+                return new SavedScriptData(playerName).GetString(stringName, perms, scriptName);
+            }
+        }
+        /// <summary>
+        /// Set package data in Script for an online or offline player. Note that setting a non-saved variable on an offline player does nothing.
+        /// </summary>
+        public static void SetData(string playerName, string stringName, string value, RunnerPerms perms, string scriptName) {
+            lock (scriptDataLocker) {
+                ScriptData sd;
+                if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
+                    sd.SetString(stringName, value, perms, scriptName);
+                }
+                new SavedScriptData(playerName).SetString(stringName, value, perms, scriptName);
             }
         }
 
@@ -806,8 +830,7 @@ namespace PluginCCS {
         static void SavePlayerData(Player p) {
             ScriptData data;
             if (!scriptDataAtPlayer.TryGetValue(p.name, out data)) { return; }
-            data.WriteSavedStringsToDisk();
-            data.hotkeys.keybinds.SaveBinds();
+            data.Save();
         }
         /// <summary>
         /// Runs after OnPlayerSpawning which resets script variables
@@ -867,9 +890,9 @@ namespace PluginCCS {
                 sevent.perms, true, data);
         }
         static void OnInfoSwap(string source, string dest) {
-            string sourcePath = ScriptData.savePath + source;
-            string destPath = ScriptData.savePath + dest;
-            string backupPath = ScriptData.savePath + "temporary-info-swap";
+            string sourcePath = SavedScriptData.savePath + source;
+            string destPath = SavedScriptData.savePath + dest;
+            string backupPath = SavedScriptData.savePath + "temporary-info-swap";
             //Chat.MessageOps("info swap event: "+sourcePath+" and "+destPath+"");
 
             if (Directory.Exists(sourcePath)) {
@@ -3698,7 +3721,7 @@ namespace PluginCCS {
                     string color = package.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX) ? "&3" : "&b";
                     run.p.Message("The value of {0}{1} &Sis \"&o{2}&S\".",
                         color,
-                        run.scriptData.ValidateStringName(package, run.perms, run.scriptName, out saved).ToLower(),
+                        ScriptData.ValidateStringName(package, run.perms, run.scriptName, out saved).ToLower(),
                         shown)
                         ;
                 }
@@ -5818,11 +5841,88 @@ namespace PluginCCS {
             return null;
         }
     }
-    public class ScriptData {
+
+    /// <summary>
+    /// Distinct from ScriptData for the purposes of loading data of an offline player.
+    /// </summary>
+    public class SavedScriptData {
+        public const string savePath = "text/inventory/";
         public const string prefixedMarker = "@";
+
+        internal readonly Dictionary<string, string> values = new Dictionary<string, string>();
+        public readonly string playerName;
+        private SavedScriptData() { }
+        internal SavedScriptData(string playerName) {
+            this.playerName = playerName;
+
+            string _, fileName;
+            if (!DoesDirectoryExist(out _, out fileName) || !File.Exists(fileName)) { return; } //no data to load
+
+            string value = "";
+            using (StreamReader sr = new StreamReader(fileName)) {
+                while ((value = sr.ReadLine()) != null) {
+                    if (!value.StartsWith(prefixedMarker)) { continue; } //something went terribly wrong there should not be data that doesn't begin with a fully formed saved string name
+                    string[] bits = value.SplitSpaces(2);
+                    if (bits.Length < 2) { continue; }
+                    values[bits[0]] = bits[1];
+                }
+            }
+        }
+        /// <summary>
+        /// Offline data retrieval. For online, use ScriptData.GetString
+        /// </summary>
+        internal string GetString(string stringName, RunnerPerms perms, string scriptName) {
+            bool saved; //C# from the 1980s doesn't support discards
+            stringName = ScriptData.ValidateStringName(stringName, perms, scriptName, out saved);
+            if (!saved) return "";
+
+            string value;
+            if (!values.TryGetValue(stringName, out value)) return "";
+            return value;
+        }
+        /// <summary>
+        /// Offline data entry. For online, use ScriptData.SetString
+        /// </summary>
+        internal void SetString(string stringName, string value, RunnerPerms perms, string scriptName) {
+            bool saved;
+            stringName = ScriptData.ValidateStringName(stringName, perms, scriptName, out saved);
+            if (!saved) return;
+
+            values[stringName] = value;
+            WriteSavedStringsToDisk();
+        }
+
+        bool DoesDirectoryExist(out string filePath, out string fileName) {
+            //delete wrong location of data.txt xDDDD
+            if (File.Exists(savePath + playerName + "/data.txt")) {
+                File.Delete(savePath + playerName + "/data.txt");
+                //p.Message("Script debug text: deleted wrong data.txt &[This message means it is working as intended and you will only see it once.");
+            }
+
+            filePath = savePath + playerName + "/data/";
+            fileName = filePath + "data.txt";
+            return Directory.Exists(filePath);
+        }
+        internal void WriteSavedStringsToDisk() {
+            //if (savedStrings.Count == 0) { return; } //if all saved data is erased the file still needs to be written to to reset it so this should stay commented out
+
+            string filePath, fileName;
+            if (!DoesDirectoryExist(out filePath, out fileName)) { Directory.CreateDirectory(filePath); }
+
+            using (StreamWriter file = new StreamWriter(fileName, false)) {
+                foreach (KeyValuePair<string, string> entry in values) {
+                    if (entry.Value.Length == 0) { continue; }
+                    file.WriteLine(entry.Key + " " + entry.Value);
+                    //p.Message("&ewriting &0{0}&e to {1}", entry.Key+" "+entry.Value, fileName);
+                }
+            }
+        }
+    }
+    public class ScriptData {
+        
         public const string savedMarker = ".";
         public const string extrasKey = "ccsPlugin_ScriptData";
-        public const string savePath = "text/inventory/";
+        
         public Player p;
         public bool frozen = false;
         public string customMOTD = null;
@@ -5839,9 +5939,9 @@ namespace PluginCCS {
         public string prevSkin = null;
 
         private readonly object packagesLocker = new object();
-        private Dictionary<string, string> strings = new Dictionary<string, string>();
-        private Dictionary<string, string> savedStrings = new Dictionary<string, string>();
-        private Dictionary<string, bool> osItems = new Dictionary<string, bool>();
+        private readonly Dictionary<string, string> strings = new Dictionary<string, string>();
+        public readonly SavedScriptData savedData;
+        private readonly Dictionary<string, bool> osItems = new Dictionary<string, bool>();
 
         private readonly object activeScriptsLocker = new object();
         public void AddActiveScript(ScriptRunner runner) {
@@ -5897,20 +5997,14 @@ namespace PluginCCS {
             this.p = p;
             SetRepliesNull();
             hotkeys = new Hotkeys(p);
+
             persistentAnnouncements = new PersistentAnnouncements(p);
 
-
-            string filePath, fileName;
-            if (!DoesDirectoryExist(out filePath, out fileName) || !File.Exists(fileName)) { return; } //no data to load
-            string value = "";
-            using (StreamReader sr = new StreamReader(fileName)) {
-                while ((value = sr.ReadLine()) != null) {
-                    if (!value.StartsWith(prefixedMarker)) { continue; } //something went terribly wrong there should not be data that doesn't begin with a fully formed saved string name
-                    string[] bits = value.SplitSpaces(2);
-                    if (bits.Length < 2) { continue; }
-                    savedStrings[bits[0]] = bits[1];
-                }
-            }
+            savedData = new SavedScriptData(p.name);
+        }
+        public void Save() {
+            savedData.WriteSavedStringsToDisk();
+            hotkeys.keybinds.SaveBinds();
         }
         public void UpdatePlayerReference(Player p) {
             this.p = p;
@@ -5973,66 +6067,41 @@ namespace PluginCCS {
             }
         }
         public void ResetSavedStrings(string scriptName, string matcher) {
-            string prefix = (prefixedMarker + scriptName + "_").ToUpper();
+            string prefix = (SavedScriptData.prefixedMarker + scriptName + "_").ToUpper();
             string pattern = prefix + "*" + matcher;
             if (!(matcher.Contains("*") || matcher.Contains("?"))) {
                 //if there are no special characters, it's a generic "contains" search, so add asterisk at the end
                 pattern = pattern + "*";
             }
-            ResetDict(savedStrings, pattern);
-        }
-
-        public void WriteSavedStringsToDisk() {
-            //if (savedStrings.Count == 0) { return; } //if all saved data is erased the file still needs to be written to to reset it so this should stay commented out
-
-            string filePath, fileName;
-            if (!DoesDirectoryExist(out filePath, out fileName)) { Directory.CreateDirectory(filePath); }
-
-            using (StreamWriter file = new StreamWriter(fileName, false)) {
-                foreach (KeyValuePair<string, string> entry in savedStrings) {
-                    if (entry.Value.Length == 0) { continue; }
-                    file.WriteLine(entry.Key + " " + entry.Value);
-                    //p.Message("&ewriting &0{0}&e to {1}", entry.Key+" "+entry.Value, fileName);
-                }
-            }
-        }
-        bool DoesDirectoryExist(out string filePath, out string fileName) {
-            //delete wrong location of data.txt
-            if (File.Exists(savePath + p.name + "/data.txt")) {
-                File.Delete(savePath + p.name + "/data.txt");
-                //p.Message("Script debug text: deleted wrong data.txt &[This message means it is working as intended and you will only see it once.");
-            }
-
-            filePath = savePath + p.name + "/data/";
-            fileName = filePath + "data.txt";
-            return Directory.Exists(filePath);
+            ResetDict(savedData.values, pattern);
         }
 
         ///in OS, strings are never saved.
         ///in mod, strings are saved if they end with a period. Saved strings are always prefixed with the @scriptname_
         ///if they aren't prefixed with the script name, it is automatically added
         ///e.g. @egg2021_eggCount.
-        public string ValidateStringName(string stringName, RunnerPerms perms, string scriptName, out bool saved) {
+        public static string ValidateStringName(string stringName, RunnerPerms perms, string scriptName, out bool saved) {
             saved = false;
+            scriptName = scriptName.ToUpper();
             if (!perms.canSave) { return stringName; }
             if (!stringName.EndsWith(savedMarker)) { return stringName; }
 
             saved = true;
 
-            if (stringName.StartsWith(prefixedMarker)) {
+            if (stringName.StartsWith(SavedScriptData.prefixedMarker)) {
                 // If script isn't ran as staff permission (/script), it cannot read or write saved packages belonging to other scripts
                 if (!perms.staffPermission) { saved = false; }
                 return stringName;
             }
 
-            return (prefixedMarker + scriptName + "_" + stringName);
+            return (SavedScriptData.prefixedMarker + scriptName + "_" + stringName).ToUpper();
         }
 
         public string GetString(string stringName, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ValidateStringName(stringName, perms, scriptName, out saved).ToUpper();
+            stringName = ValidateStringName(stringName, perms, scriptName, out saved);
 
-            var dict = saved ? savedStrings : strings;
+            var dict = saved ? savedData.values : strings;
             string value = "";
             string dicValue;
             lock (packagesLocker) {
@@ -6042,9 +6111,9 @@ namespace PluginCCS {
         }
         public void SetString(string stringName, string value, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ValidateStringName(stringName, perms, scriptName, out saved).ToUpper();
+            stringName = ValidateStringName(stringName, perms, scriptName, out saved);
 
-            var dict = saved ? savedStrings : strings;
+            var dict = saved ? savedData.values : strings;
 
             lock (packagesLocker) {
                 dict[stringName] = value;
