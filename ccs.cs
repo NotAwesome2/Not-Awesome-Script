@@ -633,10 +633,37 @@ namespace PluginCCS {
                 }
             }
         }
+
+        static void CheckPlayerName(string playerName) {
+            bool _throw = false;
+            try {
+                if (!Formatter.ValidPlayerName(null, playerName)) _throw = true;
+            } catch (NullReferenceException) {
+                _throw = true;
+            }
+            if (_throw) throw new ArgumentException(String.Format("\"{0}\" is not a valid player name.", playerName));
+        }
+        /// <summary>
+        /// Retrieve a cached read-only list of all current packages and their values
+        /// </summary>
+        public static Dictionary<string, string> GetPackages(string playerName, bool saved) {
+            CheckPlayerName(playerName);
+            lock (scriptDataLocker) {
+                ScriptData sd;
+                if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
+                    if (saved) { return sd.savedData.GetPackages(); }
+                    return sd.GetPackages();
+                }
+
+                if (saved) return new SavedScriptData(playerName).GetPackages();
+                return new Dictionary<string, string>();
+            }
+        }
         /// <summary>
         /// Retrieve package data from Script for an online or offline player
         /// </summary>
         public static string GetData(string playerName, string stringName, RunnerPerms perms, string scriptName) {
+            CheckPlayerName(playerName);
             lock (scriptDataLocker) {
                 ScriptData sd;
                 if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
@@ -649,6 +676,7 @@ namespace PluginCCS {
         /// Set package data in Script for an online or offline player. Note that setting a non-saved variable on an offline player does nothing.
         /// </summary>
         public static void SetData(string playerName, string stringName, string value, RunnerPerms perms, string scriptName) {
+            CheckPlayerName(playerName);
             lock (scriptDataLocker) {
                 ScriptData sd;
                 if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
@@ -657,6 +685,7 @@ namespace PluginCCS {
                 new SavedScriptData(playerName).SetString(stringName, value, perms, scriptName);
             }
         }
+
 
         public static Command tempBlockCmd;
         public static Command tempChunkCmd;
@@ -3713,18 +3742,22 @@ namespace PluginCCS {
                     return;
                 }
                 string[] packages = run.args.SplitSpaces();
-                bool saved;
 
+                bool saved;
                 foreach (string package in packages) {
-                    string shown = run.GetString(package);
-                    shown = EscapeColorCodes(shown, "&o");
-                    string color = package.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX) ? "&3" : "&b";
-                    run.p.Message("The value of {0}{1} &Sis \"&o{2}&S\".",
-                        color,
-                        ScriptData.ValidateStringName(package, run.perms, run.scriptName, out saved).ToLower(),
-                        shown)
-                        ;
+                    string value = run.GetString(package);
+                    string validatedPackage = ScriptData.ValidateStringName(package, run.perms, run.scriptName, out saved);
+                    DisplayValue(run.p, validatedPackage, value);
                 }
+            }
+            /// <summary>
+            /// Displays the value. Escapes color codes so that they can be seen plainly by replacing & with %.
+            /// Does not validate the package name.
+            /// </summary>
+            public static void DisplayValue(Player p, string packageName, string value) {
+                string color = packageName.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX) ? "&3" : "&b";
+                value = EscapeColorCodes(value, "&o");
+                p.Message(color+"{0} &S= \"&o{1}&S\".", packageName.ToLower(), value);
             }
             public static string EscapeColorCodes(string shown, string interrupt) {
                 shown = Colors.Escape(shown);
@@ -5842,19 +5875,40 @@ namespace PluginCCS {
         }
     }
 
+
+    public interface IScriptData {
+        public Dictionary<string, string> GetPackages();
+
+        public static Dictionary<string, string> GetPackages(Dictionary<string, string> values, object packagesLocker) {
+            lock (packagesLocker) {
+                Dictionary<string, string> all = new Dictionary<string, string>();
+                foreach (var pair in values) {
+                    all[pair.Key] = pair.Value;
+                }
+                return all;
+            }
+        }
+    }
     /// <summary>
     /// Distinct from ScriptData for the purposes of loading data of an offline player.
     /// </summary>
-    public class SavedScriptData {
+    public class SavedScriptData : IScriptData {
         public const string savePath = "text/inventory/";
         public const string prefixedMarker = "@";
 
+        public Dictionary<string, string> GetPackages() {
+            //This class may be initialised outside of ScriptData, in which case it will not have an assigned packagesLocker object
+            if (packagesLocker == null) packagesLocker = new object();
+            return IScriptData.GetPackages(values, packagesLocker);
+        }
+
         internal readonly Dictionary<string, string> values = new Dictionary<string, string>();
         public readonly string playerName;
+        object packagesLocker;
         private SavedScriptData() { }
-        internal SavedScriptData(string playerName) {
+        internal SavedScriptData(string playerName, object packagesLocker = null) {
             this.playerName = playerName;
-
+            this.packagesLocker = packagesLocker;
             string _, fileName;
             if (!DoesDirectoryExist(out _, out fileName) || !File.Exists(fileName)) { return; } //no data to load
 
@@ -5918,8 +5972,12 @@ namespace PluginCCS {
             }
         }
     }
-    public class ScriptData {
-        
+    public class ScriptData : IScriptData {
+
+        public Dictionary<string, string> GetPackages() {
+            return IScriptData.GetPackages(strings, packagesLocker);
+        }
+
         public const string savedMarker = ".";
         public const string extrasKey = "ccsPlugin_ScriptData";
         
@@ -5962,16 +6020,17 @@ namespace PluginCCS {
         public void ShowAllStrings() {
             if (strings.Count == 0) { p.Message("There are no packages to show"); return; }
 
-            var all = new List<KeyValuePair<string, string>>();
-            foreach (var pair in strings) {
-                all.Add(new KeyValuePair<string, string>(pair.Key, pair.Value));
-            }
-            //alphabetical sort
-            all.Sort((name1, name2) => string.Compare(name1.Key, name2.Key));
+            lock (packagesLocker) {
+                var all = new List<KeyValuePair<string, string>>();
+                foreach (var pair in strings) {
+                    all.Add(new KeyValuePair<string, string>(pair.Key, pair.Value));
+                }
+                //alphabetical sort
+                all.Sort((name1, name2) => string.Compare(name1.Key, name2.Key));
 
-            foreach (var pair in all) {
-                string shown = ScriptActions.Show.EscapeColorCodes(pair.Value, "&o");
-                p.Message("The value of &b{0} &Sis \"&o{1}&S\".", pair.Key.ToLower(), pair.Value);
+                foreach (var pair in all) {
+                    ScriptActions.Show.DisplayValue(p, pair.Key.ToLower(), pair.Value);
+                }
             }
         }
 
@@ -6000,7 +6059,7 @@ namespace PluginCCS {
 
             persistentAnnouncements = new PersistentAnnouncements(p);
 
-            savedData = new SavedScriptData(p.name);
+            savedData = new SavedScriptData(p.name, packagesLocker);
         }
         public void Save() {
             savedData.WriteSavedStringsToDisk();
@@ -6082,6 +6141,7 @@ namespace PluginCCS {
         ///e.g. @egg2021_eggCount.
         public static string ValidateStringName(string stringName, RunnerPerms perms, string scriptName, out bool saved) {
             saved = false;
+            stringName = stringName.ToUpper();
             scriptName = scriptName.ToUpper();
             if (!perms.canSave) { return stringName; }
             if (!stringName.EndsWith(savedMarker)) { return stringName; }
@@ -6094,7 +6154,7 @@ namespace PluginCCS {
                 return stringName;
             }
 
-            return (SavedScriptData.prefixedMarker + scriptName + "_" + stringName).ToUpper();
+            return (SavedScriptData.prefixedMarker + scriptName + "_" + stringName);
         }
 
         public string GetString(string stringName, RunnerPerms perms, string scriptName) {
@@ -6872,9 +6932,23 @@ namespace PluginCCS {
         }
 
 
-        static List<string> MatchingKeys<T>(Dictionary<string, T> dict, string keyword) {
+        public static List<string> MatchingKeys<T>(Dictionary<string, T> dict, string keyword) {
             var keys = dict.Keys.ToList();
             return Wildcard.Filter(keys, keyword, key => key);
+        }
+
+        /// <summary>
+        /// Clears the dictionary of any keys that are *not* matched.
+        /// </summary>
+        public static void Filter<T>(ref Dictionary<string, T> dict, string matcher) {
+            if (matcher.Length == 0) return;
+            List<string> keysToKeep = MatchingKeys(dict, matcher);
+            Dictionary<string, T> filtered = new Dictionary<string, T>();
+
+            foreach (string keeper in keysToKeep) {
+                filtered[keeper] = dict[keeper];
+            }
+            dict = filtered;
         }
 
         /// <summary>
