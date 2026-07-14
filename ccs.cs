@@ -1860,6 +1860,7 @@ namespace PluginCCS {
         /// </summary>
         public enum Save { NoPermission, ScriptOnly, OsScriptGroup, Global }
         static Save[] EnumMembers;
+        static string validSaveTypes { get { return String.Format("&HValid types: &T{0}", EnumMembers.Join((m) => m.ToString(), "&H, &T")); } }
 
         const string saveProp = "save_player_script_data";
         static string[] savePropDesc;
@@ -1867,11 +1868,12 @@ namespace PluginCCS {
             EnumMembers = (Save[])Enum.GetValues(typeof(Save));
 
             savePropDesc = new string[] {
-                String.Format("[{0}]", EnumMembers.Join((m) => m.ToString(), "/")),
-                "Determines permissions for saving data in an os script.",
-                "ScriptOnly allows editing saved data for this os map's script",
-                "OsScriptGroup allows editing saved data of any script that",
-                "is owned by this personal realm owner",
+                String.Format("[type]"),
+                validSaveTypes,
+                "Determines permissions for saved data in an os script.",
+                "&TScriptOnly&H targets saved data for this os map's script.",
+                "&TOsScriptGroup&H targets saved data of any script that",
+                "is owned by this personal realm owner.",
             };
 
             ExtraLevelProps.ExtraLevelProps.Register(pluginName, saveProp, LevelPermission.Operator, savePropDesc,
@@ -1880,14 +1882,10 @@ namespace PluginCCS {
         public static void Unload() {
             ExtraLevelProps.ExtraLevelProps.Unregister(saveProp);
         }
-
-        static void MsgSaveTypes(Player p) {
-            p.Message("&HValid types: &T{0}", EnumMembers.Join((m) => m.ToString(), "&H, &T"));
-        }
         static void OnPropChanging(Player p, Level level, ref string value, ref bool cancel) {
             if (String.IsNullOrEmpty(value)) {
                 p.Message("&WYou must specify a valid permission type.");
-                MsgSaveTypes(p);
+                p.Message(validSaveTypes);
                 cancel = true;
                 return;
             }
@@ -1895,7 +1893,7 @@ namespace PluginCCS {
             Save save = Matcher.Find(p, value, out matches, EnumMembers, null, (m) => m.ToString(), "save permissions");
             if (matches != 1) {
                 cancel = true;
-                MsgSaveTypes(p);
+                p.Message(validSaveTypes);
                 return;
             }
             value = save.ToString();
