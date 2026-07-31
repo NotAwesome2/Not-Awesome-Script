@@ -591,6 +591,9 @@ namespace PluginCCS {
         }
     }
 
+    //----------------------------------------------------------------------------------------------------------------------------------------
+    //----------------------------------------------------------------- CORE -----------------------------------------------------------------
+    //----------------------------------------------------------------------------------------------------------------------------------------
     public sealed class Core : Plugin {
         public static bool IsNA2 {
             get {
@@ -667,7 +670,7 @@ namespace PluginCCS {
             lock (scriptDataLocker) {
                 ScriptData sd;
                 if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
-                    return sd.GetString(stringName, perms, scriptName);
+                    return sd.GetString(stringName, perms, scriptName); //OK to throw as calling plugin must deal with this
                 }
                 return new SavedScriptData(playerName).GetString(stringName, perms, scriptName);
             }
@@ -680,7 +683,7 @@ namespace PluginCCS {
             lock (scriptDataLocker) {
                 ScriptData sd;
                 if (scriptDataAtPlayer.TryGetValue(playerName, out sd)) {
-                    sd.SetString(stringName, value, perms, scriptName);
+                    sd.SetString(stringName, value, perms, scriptName); //OK to throw as calling plugin must deal with this
                 }
                 new SavedScriptData(playerName).SetString(stringName, value, perms, scriptName);
             }
@@ -719,12 +722,6 @@ namespace PluginCCS {
             "also which script will be ran for #onExit (non OS)",
         };
 
-        public const string savePlayerScriptDataProp = "save_player_script_data";
-        static string[] savePlayerScriptDataPropDesc = new string[] {
-            "[true/false]",
-            "Allows OS scripts read and write permanently saved data."
-        };
-
         public const string multiPlayerProp = "script_multiplayer";
         static string[] multiPlayerPropDesc = new string[] {
             "[true/false]",
@@ -733,7 +730,7 @@ namespace PluginCCS {
 
         public override void Load(bool startup) {
             ExtraLevelProps.ExtraLevelProps.Register(name, inputProp, LevelPermission.Operator, inputPropDesc, null);
-            ExtraLevelProps.ExtraLevelProps.Register(name, savePlayerScriptDataProp, LevelPermission.Operator, savePlayerScriptDataPropDesc, ExtraLevelProps.ExtraLevelProps.OnPropChangingBool);
+            RunnerPerms.Load(name);
             ExtraLevelProps.ExtraLevelProps.Register(name, multiPlayerProp, LevelPermission.Operator, multiPlayerPropDesc, ExtraLevelProps.ExtraLevelProps.OnPropChangingBool);
 
             Script.PluginLoad();
@@ -791,7 +788,7 @@ namespace PluginCCS {
         }
         public override void Unload(bool shutdown) {
             ExtraLevelProps.ExtraLevelProps.Unregister(inputProp);
-            ExtraLevelProps.ExtraLevelProps.Unregister(savePlayerScriptDataProp);
+            RunnerPerms.Unload();
             ExtraLevelProps.ExtraLevelProps.Unregister(multiPlayerProp);
 
             PersistentAnnouncements.PluginUnload();
@@ -973,13 +970,13 @@ namespace PluginCCS {
             string cancelLogicLabelAndArgs = sevent.scriptLabel + '|' + runArgs;
             string onChatLabelAndArgs = chatEventLabel + '|' + runArgs;
 
-            scriptData.SetString("cancelchat", "", sevent.perms, sevent.scriptName);
+            scriptData.SetString("cancelchat", "", sevent.perms, sevent.scriptName); //will not throw as package is not saved
 
             CommandData data = sevent.GetCommandData(p.Pos.FeetBlockCoords);
             Level level = p.level; //Cache level so it doesn't change between labels
             ScriptRunner.PerformScript(p, level, sevent.scriptName, cancelLogicLabelAndArgs, sevent.perms, false, data);
 
-            if (scriptData.GetString("cancelchat", sevent.perms, sevent.scriptName).ToLower() == "true") {
+            if (scriptData.GetString("cancelchat", sevent.perms, sevent.scriptName).ToLower() == "true") { //will not throw as package is not saved
                 p.cancelchat = true;
             }
 
@@ -1858,15 +1855,93 @@ namespace PluginCCS {
 
 
     public class RunnerPerms {
+        /// <summary>
+        /// Permission to read and write saved packages
+        /// </summary>
+        public enum Save { NoPermission, ScriptOnly, OsScriptGroup, Global }
+        static Save[] EnumMembers;
+        static string validSaveTypes { get { return String.Format("&HValid types: &T{0}", EnumMembers.Join((m) => m.ToString(), "&H, &T")); } }
+
+        const string saveProp = "save_player_script_data";
+        static string[] savePropDesc;
+        public static void Load(string pluginName) {
+            EnumMembers = (Save[])Enum.GetValues(typeof(Save));
+
+            savePropDesc = new string[] {
+                String.Format("[type]"),
+                validSaveTypes,
+                "Determines permissions for saved data in an os script.",
+                "&TScriptOnly&H targets saved data for this os map's script.",
+                "&TOsScriptGroup&H targets saved data of any script that",
+                "is owned by this personal realm owner.",
+            };
+
+            ExtraLevelProps.ExtraLevelProps.Register(pluginName, saveProp, LevelPermission.Operator, savePropDesc,
+                OnPropChanging, DisplayProp);
+        }
+        public static void Unload() {
+            ExtraLevelProps.ExtraLevelProps.Unregister(saveProp);
+        }
+        static void OnPropChanging(Player p, Level level, ref string value, ref bool cancel) {
+            if (String.IsNullOrEmpty(value)) {
+                p.Message("&WYou must specify a valid permission type.");
+                p.Message(validSaveTypes);
+                cancel = true;
+                return;
+            }
+            int matches;
+            Save save = Matcher.Find(p, value, out matches, EnumMembers, null, (m) => m.ToString(), "save permissions");
+            if (matches != 1) {
+                cancel = true;
+                p.Message(validSaveTypes);
+                return;
+            }
+            value = save.ToString();
+            if (save == Save.NoPermission) value = "";
+        }
+        static string DisplayProp(Player p, Level level, string value) {
+            return "&b"+FromData(value).ToString();
+        }
+        static Save FromData(string data) {
+            if (data == null) return Save.NoPermission;
+            //Prop used to be true/false so we must account for this when reading the property
+            try {
+                //Returns true if "true";
+                //false if "false" or null;
+                //throws FormatException if neither of the above
+                bool oldProp = Convert.ToBoolean(data);
+
+                //atp we know the value is formatted like the old prop as Convert.ToBoolean has not thrown
+                return oldProp ? Save.ScriptOnly : Save.NoPermission;
+            } catch (FormatException) { }
+
+            //atp Convert has thrown so we can assume it's the new enum
+
+            Save prop;
+            if (!Enum.TryParse(data, out prop)) { return Save.NoPermission; }
+            return prop;
+        }
 
         const int actionsNormal = 61360;
         const int actionsMax = actionsNormal * 4;
         const int recursiveThreadLimitNormal = 10;
         const int recursiveThreadLimitMax = recursiveThreadLimitNormal * 2;
 
-        public static RunnerPerms Staff = new RunnerPerms(true, true, true, true);
+        public static RunnerPerms Staff = new RunnerPerms(Save.Global, true, true, true);
 
-        public readonly bool canSave;
+        public readonly Save save;
+        /// <summary>
+        /// Has the ability to save packages in any capacity (Self, within os group, or global)
+        /// </summary>
+        public bool canSaveAny { get { return save != Save.NoPermission; } }
+        /// <summary>
+        /// This script reads/writes items in /stuff (GLOBAL)
+        /// </summary>
+        public bool usesSlashStuff { get { return save == Save.Global; } }
+        /// <summary>
+        /// This script reads/writes items in /items (INTRA-SCRIPT)
+        /// </summary>
+        public bool usesSlashItems { get { return !usesSlashStuff; } }
         public readonly bool staffPermission;
         public readonly bool canRunMessageBlockRestricted;
         public readonly bool canGiveAwards;
@@ -1879,8 +1954,8 @@ namespace PluginCCS {
         const int newThreadLimitMax = 64;
 
 
-        public RunnerPerms(bool canSave, bool runAsNobody, bool canRunMessageBlockRestricted, bool canGiveAwards) {
-            this.canSave = canSave;
+        public RunnerPerms(Save save, bool runAsNobody, bool canRunMessageBlockRestricted, bool canGiveAwards) {
+            this.save = save;
             this.staffPermission = runAsNobody;
             this.canRunMessageBlockRestricted = canRunMessageBlockRestricted;
             this.canGiveAwards = canGiveAwards;
@@ -1896,7 +1971,7 @@ namespace PluginCCS {
         /// Generates the appropriate non-staff permissions for the given level. E.g. may allow saving via extra level prop
         /// </summary>
         public RunnerPerms(Level lvl) {
-            canSave = lvl.GetExtraPropBool(Core.savePlayerScriptDataProp);
+            save = FromData(lvl.GetExtraPropString(saveProp, null));
 
             actionLimit = staffPermission ? actionsMax : actionsNormal;
             recursiveThreadLimit = staffPermission ? recursiveThreadLimitMax : recursiveThreadLimitNormal;
@@ -2251,10 +2326,10 @@ namespace PluginCCS {
             if (!File.Exists(filePath)) { return false; }
 
             ScriptData scriptData = Core.GetScriptData(p);
-            scriptData.SetString("denyAccess", "", RunnerPerms.Staff, levelName);
+            scriptData.SetString("denyAccess", "", RunnerPerms.Staff, levelName); //will not throw as package is not saved
             PerformScript(p, p.level, levelName, ACCESS_CONTROL, RunnerPerms.Staff, false, CommandData());
 
-            return scriptData.GetString("denyAccess", RunnerPerms.Staff, levelName).CaselessEq("true");
+            return scriptData.GetString("denyAccess", RunnerPerms.Staff, levelName).CaselessEq("true"); //will not throw as package is not saved
         }
         /// <summary>
         /// Tries to perform #onExit for the given level, single-threaded
@@ -2592,8 +2667,12 @@ namespace PluginCCS {
             ReadOnlyPackages.ReadOnlyPackage rop = ReadOnlyPackages.GetReadOnlyPackage(this, stringName);
             if (rop != null) { return rop.Getter(this); }
 
-
-            return scriptData.GetString(stringName, perms, scriptName);
+            try {
+                return scriptData.GetString(stringName, perms, scriptName); //throw handled :)
+            } catch (InvalidOperationException e) {
+                Error(e.Message);
+                return "";
+            }
         }
         public void SetString(string stringName, string value) {
             if (curLine != null && curLine.uses.local_packages && stringName.CaselessStarts(Script.Uses.LOCAL_PACKAGES_PREFIX)) {
@@ -2604,7 +2683,11 @@ namespace PluginCCS {
             ReadOnlyPackages.ReadOnlyPackage rop = ReadOnlyPackages.GetReadOnlyPackage(this, stringName);
             if (rop != null) { Error("You cannot set a value to the preset package \"{0}\" because it is read only", rop.GetType().Name); return; }
 
-            scriptData.SetString(stringName, value, perms, scriptName);
+            try {
+                scriptData.SetString(stringName, value, perms, scriptName); //throw handled :)
+            } catch (InvalidOperationException e) {
+                Error(e.Message);
+            }
         }
 
         public const char beginParseSymbol = '{';
@@ -2699,6 +2782,7 @@ namespace PluginCCS {
             World         = 1 <<  9,
             Player_Events = 1 << 10,
             Plugins       = 1 << 11,
+            String        = 1 << 12,
         }
 
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
@@ -3746,8 +3830,13 @@ namespace PluginCCS {
                 bool saved;
                 foreach (string package in packages) {
                     string value = run.GetString(package);
-                    string validatedPackage = ScriptData.ValidateStringName(package, run.perms, run.scriptName, out saved);
-                    DisplayValue(run.p, validatedPackage, value);
+                    try {
+                        string validatedPackage = ScriptData.ValidateStringName(package, run.perms, run.scriptName, out saved); //throw handled :)
+                        DisplayValue(run.p, validatedPackage, value);
+                    } catch (InvalidOperationException e) {
+                        //run.Error(e.Message); //Don't want this as run.GetString already provides feedback
+                        return;
+                    }
                 }
             }
             /// <summary>
@@ -3840,13 +3929,18 @@ namespace PluginCCS {
                     return;
                 }
                 if (run.cmdName.CaselessStarts("items")) {
-                    if (run.perms.canSave) { run.Error("Cannot reset items in non-os script"); return; }
+                    if (run.perms.usesSlashStuff) { run.Error("Cannot reset items as this script uses /stuff"); return; }
                     run.scriptData.Reset(false, true, run.cmdArgs);
                     return;
                 }
                 if (run.cmdName.CaselessStarts("saved")) {
-                    if (!run.perms.canSave) { run.Error("Cannot reset saved packages in os script"); return; }
-                    run.scriptData.ResetSavedStrings(run.scriptName, run.cmdArgs);
+                    if (!run.perms.canSaveAny) { run.Error("This script has no permission to edit saved packages"); return; }
+                    try {
+                        run.scriptData.ResetSavedStrings(run.scriptName, run.cmdArgs);
+                    } catch (ArgumentException e) {
+                        run.Error(e.Message);
+                    }
+
                     return;
                 }
                 run.Error("You must specify what type of data to reset");
@@ -4837,6 +4931,337 @@ namespace PluginCCS {
                 double y = -Math.Sin(pitch);
                 double z = -Math.Cos(yaw) * Math.Cos(pitch);
                 return new Vec3F32((float)x, (float)y, (float)z);
+            }
+        }
+        public class SetStrIndexOf : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Finds the first zero-based index instance of the string in the package and sets that to [package].IndexOf. If none is found, it's set to -1.",
+                "    For example:",
+                "        set someString abc zbc",
+                "        setstrindexof someString bc",
+                "        someString.IndexOf = 1",
+            }; } }
+
+            public override string name { get { return "setstrindexof"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                run.SetString(package + ".IndexOf", str.IndexOf(substr).ToString());
+            }
+        }
+        public class SetStrLastIndexOf : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Finds the last zero-based index instance of the string in the package and sets that to [package].IndexOf. If none is found, it's set to -1.",
+                "    For example:",
+                "        set someString abc zbc",
+                "        setstrlastindexof someString bc",
+                "        someString.IndexOf = 5",
+            }; } }
+
+            public override string name { get { return "setstrlastindexof"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                run.SetString(package + ".IndexOf", str.LastIndexOf(substr).ToString());
+            }
+        }
+        public class SetStrRemove : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Removes the first instance of [string] from [package]. If [string] is not contained in [package], nothing happens.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrremove someString day",
+                "        someString = \"Every thing\"",
+            }; } }
+
+            public override string name { get { return "setstrremove"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                if (run.cmdArgs == "") { return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+                int indexOf = str.IndexOf(substr);
+                if (indexOf < 0) { return; }
+
+                run.SetString(package, str.Remove(indexOf, substr.Length));
+            }
+        }
+        public class SetStrStartsWith : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Sets [package].StartsWith to true [package] starts with [string], otherwise sets it to false.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrstartswith someString Every",
+                "        someString.StartsWith = \"true\"",
+            }; } }
+
+            public override string name { get { return "setstrstartswith"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                if (str.StartsWith(substr)) {
+                    run.SetString(package + ".StartsWith", "true");
+                } else {
+                    run.SetString(package + ".StartsWith", "false");
+                }
+            }
+        }
+        public class SetStrEndsWith : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Sets [package].EndsWith to true [package] starts with [string], otherwise sets it to false.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrstartswith someString thing",
+                "        someString.EndsWith = \"true\"",
+            }; } }
+
+            public override string name { get { return "setstrendswith"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                if (str.EndsWith(substr)) {
+                    run.SetString(package + ".EndsWith", "true");
+                } else {
+                    run.SetString(package + ".EndsWith", "false");
+                }
+            }
+        }
+        public class SetStrUpper : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    Sets [package] to uppercase.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrupper someString",
+                "        someString = \"EVERYDAY THING\"",
+            }; } }
+
+            public override string name { get { return "setstrupper"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+
+                run.SetString(package, str.ToUpperInvariant());
+            }
+        }
+        public class SetStrLower : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    Sets [package] to lowercase.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrupper someString",
+                "        someString = \"everyday thing\"",
+            }; } }
+
+            public override string name { get { return "setstrlower"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+
+                run.SetString(package, str.ToLowerInvariant());
+            }
+        }
+        public class SetStrInsert : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [start] [string]",
+                "    Inserts [string] in [package] at the zero-based index [start].",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrinsert someString 3 WOW",
+                "        someString = \"EveWOWryday thing\"",
+            }; } }
+
+            public override string name { get { return "setstrinsert"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string[] argBits = run.cmdArgs.SplitSpaces();
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = "";
+                if (argBits.Length > 1) {
+                    substr = run.cmdArgs.Remove(0, argBits[0].Length + 1); // Not including the index
+                }
+                
+                int start;
+                if (!NumberParser.TryParseInt(argBits[0], out start)) { run.Error("setstrinsert must receive an integer as the first input, got \"{0}\" instead.", argBits[0]); return; }
+                if (start < 0) { run.Error("setstrinsert must receive a non-negative index, got {0} instead.", start.ToString()); return; }
+                if (start > str.Length) { run.Error("setstrinsert must receive an index not bigger than the package's length ({0}), got {1} instead.", str.Length.ToString(), start.ToString()); return; }
+
+                run.SetString(package, str.Insert(start, substr));
+            }
+        }
+        public class SetStrSubstring : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [start] <length>",
+                "    Gets the substring of [package] starting at the zero-based index [start] and going until the end or until a desired <length> and sets that to [package].Substring",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrsubstring someString 5 7",
+                "        someString.Substring = \"day thi\"",
+            }; } }
+
+            public override string name { get { return "setstrsubstring"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string[] argBits = run.cmdArgs.SplitSpaces();
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                
+                int start;
+                if (!NumberParser.TryParseInt(argBits[0], out start)) { run.Error("setstrsubstring must receive an integer as the first input, got \"{0}\" instead.", argBits[0]); return; }
+                if (start < 0) { run.Error("setstrsubstring must receive a non-negative index, got {0} instead.", start.ToString()); return; }
+                if (start > str.Length) { run.Error("setstrsubstring must receive an index not bigger than the package's length ({0}), got {1} instead.", str.Length.ToString(), start.ToString()); return; }
+
+                if (argBits.Length == 1) {
+                    run.SetString(package + ".Substring", str.Substring(start));
+                } else {
+                    int length;
+                    if (!NumberParser.TryParseInt(argBits[1], out length)) { run.Error("setstrsubstring must receive an integer as the second input, got \"{0}\" instead.", argBits[1]); return; }
+                    if (length < 0) { run.Error("setstrsubstring must receive a non-negative length, got {0} instead.", length.ToString()); return; }
+                    if (length > str.Length - start) { run.Error("setstrsubstring must receive an index not bigger than the package's remaining length ({0}), got {1} instead.", (str.Length - start).ToString(), length.ToString()); return; }
+                    
+                    run.SetString(package + ".Substring", str.Substring(start, length));
+                }
+            }
+        }
+        public class SetStrReverse : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    Reverses [package].",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrreverse someString",
+                "        someString = \"gniht yadyrevE\"",
+            }; } }
+
+            public override string name { get { return "setstrreverse"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                
+                char[] charArray = str.ToCharArray();
+                Array.Reverse(charArray);
+
+                run.SetString(package, new string(charArray));
+            }
+        }
+        public class SetStrBefore : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Gets the substring of [package], starting from the beginning and ending at the first instance [string], not including [string], and sets that to [package].Before.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrbefore someString day",
+                "        someString.Before = \"Every\"",
+            }; } }
+
+            public override string name { get { return "setstrbefore"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string end = run.cmdArgs;
+                int index = str.IndexOf(end);
+
+                if (index == -1) { run.Error("setstrbefore requires that the delimiter is part of the string"); return; }
+
+                run.SetString(package + ".Before", str.Substring(0, index));
+            }
+        }
+        public class SetStrAfter : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Gets the substring of [package], starting from the first instance of [string], not including [string], going all the way to the end, and sets that to [package].After.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrafter someString day",
+                "        someString.After = \" thing\"",
+            }; } }
+
+            public override string name { get { return "setstrafter"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string begin = run.cmdArgs;
+                int index = str.IndexOf(begin);
+
+                if (index == -1) { run.Error("setstrafter requires that the delimiter is part of the string"); return; }
+
+                run.SetString(package + ".After", str.Substring(index + begin.Length));
+            }
+        }
+        public class SetIsNumber : ScriptAction {
+            public override Cat cat { get { return Cat.Packages; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    If [package] is a number, set [package].IsNumber to true, otherwise set it to false.",
+            }; } }
+
+            public override string name { get { return "setisnumber"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                double reallyUselessDoubleThatJustExistsToNotCauseErrors;
+                
+                if (NumberParser.TryParseDouble(str, out reallyUselessDoubleThatJustExistsToNotCauseErrors)) {
+                    run.SetString(package + ".IsNumber", "true");
+                } else {
+                    run.SetString(package + ".IsNumber", "false");
+                }
             }
         }
         public abstract class Event : ScriptAction {
@@ -5876,30 +6301,17 @@ namespace PluginCCS {
     }
 
 
-    public interface IScriptData {
-        public Dictionary<string, string> GetPackages();
-
-        public static Dictionary<string, string> GetPackages(Dictionary<string, string> values, object packagesLocker) {
-            lock (packagesLocker) {
-                Dictionary<string, string> all = new Dictionary<string, string>();
-                foreach (var pair in values) {
-                    all[pair.Key] = pair.Value;
-                }
-                return all;
-            }
-        }
-    }
     /// <summary>
     /// Distinct from ScriptData for the purposes of loading data of an offline player.
     /// </summary>
-    public class SavedScriptData : IScriptData {
+    public class SavedScriptData {
         public const string savePath = "text/inventory/";
         public const string prefixedMarker = "@";
 
         public Dictionary<string, string> GetPackages() {
             //This class may be initialised outside of ScriptData, in which case it will not have an assigned packagesLocker object
             if (packagesLocker == null) packagesLocker = new object();
-            return IScriptData.GetPackages(values, packagesLocker);
+            return ScriptData._GetPackages(values, packagesLocker);
         }
 
         internal readonly Dictionary<string, string> values = new Dictionary<string, string>();
@@ -5927,7 +6339,7 @@ namespace PluginCCS {
         /// </summary>
         internal string GetString(string stringName, RunnerPerms perms, string scriptName) {
             bool saved; //C# from the 1980s doesn't support discards
-            stringName = ScriptData.ValidateStringName(stringName, perms, scriptName, out saved);
+            stringName = ScriptData.ValidateStringName(stringName, perms, scriptName, out saved); //OK to throw as calling plugin must deal with this
             if (!saved) return "";
 
             string value;
@@ -5939,7 +6351,7 @@ namespace PluginCCS {
         /// </summary>
         internal void SetString(string stringName, string value, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ScriptData.ValidateStringName(stringName, perms, scriptName, out saved);
+            stringName = ScriptData.ValidateStringName(stringName, perms, scriptName, out saved); //OK to throw as calling plugin must deal with this
             if (!saved) return;
 
             values[stringName] = value;
@@ -5972,10 +6384,19 @@ namespace PluginCCS {
             }
         }
     }
-    public class ScriptData : IScriptData {
+    public class ScriptData {
 
+        public static Dictionary<string, string> _GetPackages(Dictionary<string, string> values, object packagesLocker) {
+            lock (packagesLocker) {
+                Dictionary<string, string> all = new Dictionary<string, string>();
+                foreach (var pair in values) {
+                    all[pair.Key] = pair.Value;
+                }
+                return all;
+            }
+        }
         public Dictionary<string, string> GetPackages() {
-            return IScriptData.GetPackages(strings, packagesLocker);
+            return _GetPackages(strings, packagesLocker);
         }
 
         public const string savedMarker = ".";
@@ -6125,7 +6546,16 @@ namespace PluginCCS {
                 dict.Clear(matcher);
             }
         }
+        /// <summary>
+        /// Only resets strings that belong to this script (qualified prefix is automatically added)
+        /// </summary>
         public void ResetSavedStrings(string scriptName, string matcher) {
+            if (matcher.StartsWith(SavedScriptData.prefixedMarker)) {
+                throw new ArgumentException(String.Format(
+                    "Resetdata may not target saved packages belonging to any other script. Do not qualify your matcher by prefixing {0}.",
+                    SavedScriptData.prefixedMarker));
+            }
+
             string prefix = (SavedScriptData.prefixedMarker + scriptName + "_").ToUpper();
             string pattern = prefix + "*" + matcher;
             if (!(matcher.Contains("*") || matcher.Contains("?"))) {
@@ -6135,31 +6565,81 @@ namespace PluginCCS {
             ResetDict(savedData.values, pattern);
         }
 
-        ///in OS, strings are never saved.
-        ///in mod, strings are saved if they end with a period. Saved strings are always prefixed with the @scriptname_
-        ///if they aren't prefixed with the script name, it is automatically added
-        ///e.g. @egg2021_eggCount.
-        public static string ValidateStringName(string stringName, RunnerPerms perms, string scriptName, out bool saved) {
+        /// <summary>
+        /// Throws InvalidOperationException if varName is a saved package and it is incompatible with the RunnerPerms save.
+        /// Without save permissions, strings are never saved.
+        /// With save permissions, strings are saved if they end with a period. Saved strings are always prefixed with the @scriptname_
+        /// if they aren't prefixed with the script name, it is automatically added
+        /// e.g. @egg2021_eggCount.
+        /// </summary>
+        public static string ValidateStringName(string varName, RunnerPerms perms, string scriptName, out bool saved) {
             saved = false;
-            stringName = stringName.ToUpper();
+            varName = varName.ToUpper();
             scriptName = scriptName.ToUpper();
-            if (!perms.canSave) { return stringName; }
-            if (!stringName.EndsWith(savedMarker)) { return stringName; }
+            if (!perms.canSaveAny) { return varName; }
+            if (!varName.EndsWith(savedMarker)) {
+                if (varName.StartsWith(SavedScriptData.prefixedMarker)) {
+                    throw new InvalidOperationException(String.Format(
+                            "Package &b{0}&S begins with {1} to target other script's saved packages, but does not end with the '.' saved marker.",
+                            varName.ToLower(), SavedScriptData.prefixedMarker));
+                }
+                return varName;
+            }
 
             saved = true;
 
-            if (stringName.StartsWith(SavedScriptData.prefixedMarker)) {
-                // If script isn't ran as staff permission (/script), it cannot read or write saved packages belonging to other scripts
-                if (!perms.staffPermission) { saved = false; }
-                return stringName;
+            //Scripter has manually prefixed the marker to target a given script
+            if (varName.StartsWith(SavedScriptData.prefixedMarker)) {
+
+                //Script can edit its own data, but may not edit others. Throw as this is likely a mistake.
+                if (perms.save == RunnerPerms.Save.ScriptOnly) {
+                    throw new InvalidOperationException(String.Format(
+                            "The \"{0}\" prefix used to target saved packages of other scripts is not allowed when this script ({1}) may only edit its own saved packages.",
+                            SavedScriptData.prefixedMarker, scriptName.ToLower()+Script.EXT));
+                }
+
+                if (perms.save == RunnerPerms.Save.OsScriptGroup) {
+                    //SCRIPTNAME:
+                    // os/girl+
+                    // os/girl+arbitrary
+                    int scriptPlus = scriptName.IndexOf('+');
+                    if (scriptPlus == -1) {
+                        throw new InvalidOperationException(String.Format(
+                                "Script &b{0}&S has save permission of {1}, but its name has no +. Therefore, an os script group for it cannot be determined.",
+                                scriptName.ToLower()+Script.EXT, perms.save));
+                    }
+                    //VARNAME:
+                    // @os/girl+_arbitrary.
+                    // @os/girl+arbitrary_arbitrary.
+                    int varPlus = varName.IndexOf('+');
+                    if (varPlus == -1) {
+                        throw new InvalidOperationException(String.Format(
+                                "Script &b{0}&S has save permission of {1}, but its package &b{2}&S has no +. Therefore, an os script group cannot be determined.",
+                                scriptName.ToLower()+Script.EXT, perms.save, varName.ToLower()));
+                    }
+
+                    string scriptOsGroup = scriptName.Substring(0, scriptPlus+1); // os/girl+
+                    string varOsGroup    =    varName.Substring(1, varPlus     ); // os/girl+
+
+                    if (scriptOsGroup != varOsGroup) {
+                        throw new InvalidOperationException(String.Format(
+                                "Script &b{0}&S has save permission of {1}, but its package &b{2}&S targets a script that does not belong to its os script group.",
+                                scriptName.ToLower()+Script.EXT, perms.save, varName.ToLower()));
+                    }
+                }
+                //os map group matches for script and variable name OR this script has Save.Global permissions. Return qualified variable name as-is.
+                return varName;
             }
 
-            return (SavedScriptData.prefixedMarker + scriptName + "_" + stringName);
+            return (SavedScriptData.prefixedMarker + scriptName + "_" + varName);
         }
 
+        /// <summary>
+        /// Throws if stringName is saved package and perms are incompatible
+        /// </summary>
         public string GetString(string stringName, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ValidateStringName(stringName, perms, scriptName, out saved);
+            stringName = ValidateStringName(stringName, perms, scriptName, out saved); //OK to throw as outer callers deal with this
 
             var dict = saved ? savedData.values : strings;
             string value = "";
@@ -6169,9 +6649,12 @@ namespace PluginCCS {
             }
             return value;
         }
+        /// <summary>
+        /// Throws if stringName is saved package and perms are incompatible
+        /// </summary>
         public void SetString(string stringName, string value, RunnerPerms perms, string scriptName) {
             bool saved;
-            stringName = ValidateStringName(stringName, perms, scriptName, out saved);
+            stringName = ValidateStringName(stringName, perms, scriptName, out saved); //OK to throw as outer callers deal with this
 
             var dict = saved ? savedData.values : strings;
 
@@ -6181,9 +6664,9 @@ namespace PluginCCS {
         }
 
 
-        public bool HasItem(string itemName, RunnerPerms perms) { return !perms.canSave ? OsHasItem(itemName) : ModHasItem(itemName); }
-        public void GiveItem(string itemName, RunnerPerms perms) { if (!perms.canSave) { OsGiveItem(itemName); } else { ModGiveItem(itemName); } }
-        public void TakeItem(string itemName, RunnerPerms perms) { if (!perms.canSave) { OsTakeItem(itemName); } else { ModTakeItem(itemName); } }
+        public bool HasItem(string itemName, RunnerPerms perms) { return perms.usesSlashItems ? OsHasItem(itemName) : ModHasItem(itemName); }
+        public void GiveItem(string itemName, RunnerPerms perms) { if (perms.usesSlashItems) { OsGiveItem(itemName); } else { ModGiveItem(itemName); } }
+        public void TakeItem(string itemName, RunnerPerms perms) { if (perms.usesSlashItems) { OsTakeItem(itemName); } else { ModTakeItem(itemName); } }
 
         private bool ModHasItem(string itemName) {
             try {
