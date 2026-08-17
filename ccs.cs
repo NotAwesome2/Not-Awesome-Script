@@ -987,6 +987,27 @@ namespace PluginCCS {
             Script.OnPlayerCommand(p, cmd, message, data);
         }
         static void OnPlayerMove(Player p, Position next, byte yaw, byte pitch, ref bool cancel) {
+            OnPlayerMove_LookAtCoords(p);
+            OnPlayerMove_CoordChanged(p, next);
+        }
+        static void OnPlayerMove_CoordChanged(Player p, Position next) {
+            ScriptData data = GetScriptData(p);
+            if (data.coordChangedEvents == null) return;
+            Sevent sevent = data.coordChangedEvents.sync;
+            if (sevent.level != p.level) return;
+
+            Vec3S32 newCoords = next.FeetBlockCoords;
+            if (data.coordChangedEvents.data is Vec3S32 && (Vec3S32)data.coordChangedEvents.data == newCoords) {
+                return;
+            }
+            data.coordChangedEvents.data = newCoords;
+
+            bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async; //Actually always sync for now...
+            ScriptRunner.PerformScriptOnNewThread(
+                p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable, sevent.GetCommandData(next.FeetBlockCoords)
+                );
+        }
+        static void OnPlayerMove_LookAtCoords(Player p) {
             ScriptData scriptData = GetScriptData(p); if (scriptData == null) { return; }
             if (scriptData.stareCoords != null) {
                 ScriptRunner.LookAtCoords(p, (Vec3S32)scriptData.stareCoords);
@@ -5072,6 +5093,23 @@ namespace PluginCCS {
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.zoneChangedEvents; }
             public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Async; } }
         }
+        public class CoordChangedEvent : Event {
+            public override Cat cat { get { return Cat.Player_Events; } }
+            public override string[] documentation { get { return new string[] {
+                "sync register [#label]",
+                "    Registers a label that will be called whenever the player's block coordinates change.",
+                "    runArg1 will be given the coordinates that the player has changed to",
+                "zonechangedevent sync unregister",
+                "    Unregisteres the previously registered [label].",
+                "    ---",
+                "    IMPORTANT: Only one label may be registered at a time",
+                "    Repeating the Action will simply replace whatever label may have been registered before.",
+            }; } }
+
+            public override string name { get { return "coordchangedevent"; } }
+            protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.coordChangedEvents; }
+            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Sync; } }
+        }
         public class Error : ScriptAction {
             public override Cat cat { get { return Cat.Basic; } }
             public override string[] documentation { get { return new string[] {
@@ -5927,6 +5965,8 @@ namespace PluginCCS {
             async = null;
             sync = null;
         }
+
+        public object data = null;
     }
     public class ClickInfo {
         public readonly MouseButton button;
@@ -6079,6 +6119,7 @@ namespace PluginCCS {
         public SevGroup clickEvents = new SevGroup();
         public SevGroup chatEvents = new SevGroup();
         public SevGroup zoneChangedEvents = new SevGroup();
+        public SevGroup coordChangedEvents = new SevGroup();
 
 
         public string prevModel = null;
@@ -6181,6 +6222,8 @@ namespace PluginCCS {
             clickEvents.Reset();
             chatEvents.Reset();
             zoneChangedEvents.Reset();
+            coordChangedEvents.Reset();
+            coordChangedEvents.data = null;
             persistentAnnouncements.Clear();
 
             ResetReplies();
