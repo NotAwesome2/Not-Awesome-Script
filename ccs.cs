@@ -994,7 +994,7 @@ namespace PluginCCS {
             ScriptData data = GetScriptData(p);
             if (data.coordChangedEvents == null) return;
             Sevent sevent = data.coordChangedEvents.sync;
-            if (sevent.level != p.level) return;
+            if (sevent == null || sevent.level != p.level) return;
 
             Vec3S32 newCoords = next.FeetBlockCoords;
             if (data.coordChangedEvents.data is Vec3S32 && (Vec3S32)data.coordChangedEvents.data == newCoords) {
@@ -5098,8 +5098,8 @@ namespace PluginCCS {
             public override string[] documentation { get { return new string[] {
                 "sync register [#label]",
                 "    Registers a label that will be called whenever the player's block coordinates change.",
-                "    runArg1 will be given the coordinates that the player has changed to",
-                "zonechangedevent sync unregister",
+                "    The coord that the player has changed to will be passed to MBCoords, MBX, MBY, MBZ.",
+                "coordchangedevent sync unregister",
                 "    Unregisteres the previously registered [label].",
                 "    ---",
                 "    IMPORTANT: Only one label may be registered at a time",
