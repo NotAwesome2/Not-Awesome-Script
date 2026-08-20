@@ -5160,34 +5160,49 @@ namespace PluginCCS {
                 switch (run.cmdName.ToLower()) {
                     case "crosshair":
                         bool showCrosshair = false;
-                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showCrosshair)) return;
+                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showCrosshair)) {
+                            run.ErrorAbove();
+                            return;
+                        }
                         run.p.CinematicGui.hideCrosshair = !showCrosshair;
                         break;
                     case "hand":
                         bool showHand = false;
-                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showHand)) return;
+                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showHand)) {
+                            run.ErrorAbove();
+                            return;
+                        }
                         run.p.CinematicGui.hideHand = !showHand;
                         break;
                     case "hotbar":
                         bool showHotbar = false;
-                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showHotbar)) return;
+                        if (!CommandParser.GetBool(run.p, run.cmdArgs, ref showHotbar)) {
+                            run.ErrorAbove();
+                            return;
+                        }
                         run.p.CinematicGui.hideHotbar = !showHotbar;
                         break;
                     case "barsize":
                         float size = 0;
-                        if (!CommandParser.GetReal(run.p, run.cmdArgs, "bar size", ref size)) return;
+                        if (!CommandParser.GetReal(run.p, run.cmdArgs, "bar size", ref size)) {
+                            run.ErrorAbove();
+                            return;
+                        }
                         run.p.CinematicGui.barSize = size;
                         break;
                     case "barcolor":
                         ColorDesc c;
                         string[] args = run.cmdArgs.SplitSpaces();
                         if (!Colors.TryParseHex(args[0], out c)) {
-                            run.p.Message("&WInvalid hex color \"{0}\" for barcolor.", run.cmdArgs);
+                            run.Error("&WInvalid hex color \"{0}\" for barcolor.", run.cmdArgs);
                             return;
                         }
                         if (args.Length > 1) {
                             float alpha = 0;
-                            if (!CommandParser.GetReal(run.p, args[1], "bar color opaqueness", ref alpha)) return;
+                            if (!CommandParser.GetReal(run.p, args[1], "bar color opaqueness", ref alpha)) {
+                                run.ErrorAbove();
+                                return;
+                            }
                             //Bounds checking outside of the command parser to make script more lenient
                             //We want to be able to just send out-of-range values and it still works
                             if (alpha < 0) alpha = 0;
