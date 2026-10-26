@@ -779,6 +779,8 @@ namespace PluginCCS {
             OnPlayerDisconnectEvent.Register(OnPlayerDisconnect, Priority.Low);
             OnPlayerMoveEvent.Register(OnPlayerMove, Priority.Low);
             OnPlayerClickEvent.Register(OnPlayerClick, Priority.Low);
+            OnNotifyActionEvent.Register(OnNotifyAction, Priority.Normal);
+            OnNotifyPositionActionEvent.Register(OnNotifyPositionAction, Priority.Normal);
 
             foreach (Player pl in PlayerInfo.Online.Items) {
                 OnPlayerFinishConnecting(pl);
@@ -819,6 +821,8 @@ namespace PluginCCS {
             OnPlayerDisconnectEvent.Unregister(OnPlayerDisconnect);
             OnPlayerMoveEvent.Unregister(OnPlayerMove);
             OnPlayerClickEvent.Unregister(OnPlayerClick);
+            OnNotifyActionEvent.Unregister(OnNotifyAction);
+            OnNotifyPositionActionEvent.Unregister(OnNotifyPositionAction);
 
             SaveAllPlayerData();
             scriptDataAtPlayer.Clear();
@@ -1044,6 +1048,27 @@ namespace PluginCCS {
                 clickInfo);
         }
 
+
+        #region NotifyAction
+        static void OnNotifyAction(Player p, NotifyActionType action, short value) { HandleNotifyAction(p, action, value, 0, 0, 0); }
+        static void OnNotifyPositionAction(Player p, NotifyActionType action, ushort x, ushort y, ushort z) { HandleNotifyAction(p, action, 0, x, y, z); }
+        static void HandleNotifyAction(Player p, NotifyActionType action, short value, ushort x, ushort y, ushort z) {
+            ScriptData data = GetScriptData(p);
+            if (!data.notifyActionEvents.active) { return; }
+            DoNotifyAction(p, data.notifyActionEvents.sync);
+            DoNotifyAction(p, data.notifyActionEvents.async);
+        }
+        static void DoNotifyAction(Player p, Sevent sevent) {
+            if (sevent == null) { return; }
+            bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async;
+            throw new NotImplementedException();
+            //TODO: Pass relevant data to script (make clickinfo more generic, maybe?)
+            //TODO: Add actual NotifyAction script Action
+            //ScriptRunner.PerformScriptOnNewThread(
+            //    p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable,
+            //    sevent.GetCommandData(p.Pos.FeetBlockCoords));
+        }
+        #endregion
     }
     public static class StringUtils {
 
@@ -1367,7 +1392,7 @@ namespace PluginCCS {
             try {
                 File.Copy(scriptPath, fullPath(p.level), true);
             } catch (System.Exception e) {
-                p.Message("&cAn error occured while retrieving your script:");
+                p.Message("&cAn error occurred while retrieving your script:");
                 p.Message(e.Message);
                 return;
             }
@@ -2166,7 +2191,7 @@ namespace PluginCCS {
                 cmd.Use(p, args, GetCommandData());
             } catch (Exception ex) {
                 //Logger.LogError(ex);
-                Error("An error occured when running command {0} with args \"{1}\": &S{2}", cmd.name, args, ex.Message);
+                Error("An error occurred when running command {0} with args \"{1}\": &S{2}", cmd.name, args, ex.Message);
             }
         }
         public void DoCmd(Command cmd, string args) {
@@ -2181,7 +2206,7 @@ namespace PluginCCS {
                             scriptRunner.Run(startLabel, newThreadNestLevel + 1);
                         } catch (Exception ex) {
                             Logger.LogError(ex);
-                            Error("An error occured and newthread {0} could not be executed.", startLabel);
+                            Error("An error occurred and newthread {0} could not be executed.", startLabel);
                         }
                     }
                 );
@@ -2332,7 +2357,7 @@ namespace PluginCCS {
                             PerformScript(p, level, scriptName, startLabel, perms, repeatable, data, clickInfo);
                         } catch (Exception ex) {
                             Logger.LogError(ex);
-                            p.Message("&WAn error occured: {0}", ex.Message);
+                            p.Message("&WAn error occurred: {0}", ex.Message);
                         }
                     }
                 );
@@ -2718,7 +2743,7 @@ namespace PluginCCS {
         const int maxRecursions = 32;
         string ParseMessage(string message, int recursions = 0) {
             if (recursions == 0) { message = ReplaceAts(message); } else if (recursions > maxRecursions) {
-                Error("More than {0} recursions occured while trying to unwrap package value(s) from: \"{1}\"", maxRecursions, message);
+                Error("More than {0} recursions occurred while trying to unwrap package value(s) from: \"{1}\"", maxRecursions, message);
                 p.Message("To prevent an infinite loop, this is not allowed.");
                 return message;
             }
@@ -2780,7 +2805,7 @@ namespace PluginCCS {
         }
         void _Error(string reason) {
             p.Message("----------------");
-            p.Message("&WA script error has occured");
+            p.Message("&WA script error has occurred");
             p.Message("&WOrigin: &S{0} {1}", scriptName, startLabel);
             p.Message("&WCulprit: &S{0} at line {1}", curLine.scriptName, curLine.lineNumber);
             p.Message("&WReason: &S{0}", reason);
@@ -5098,7 +5123,6 @@ namespace PluginCCS {
         public class CoordChangedEvent : Event {
             public override Cat cat { get { return Cat.Player_Events; } }
             public override string[] documentation { get { return new string[] {
-                "sync register [#label]",
                 "[async or sync] register [#label]",
                 "    Registers a label that will be called whenever the player's block coordinates change.",
                 "    The coord that the player has changed to will be passed to MBCoords, MBX, MBY, MBZ.",
@@ -6140,6 +6164,7 @@ namespace PluginCCS {
         public SevGroup chatEvents = new SevGroup();
         public SevGroup zoneChangedEvents = new SevGroup();
         public SevGroup coordChangedEvents = new SevGroup();
+        public SevGroup notifyActionEvents = new SevGroup();
 
 
         public string prevModel = null;
