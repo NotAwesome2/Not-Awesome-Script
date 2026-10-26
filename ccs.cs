@@ -990,11 +990,15 @@ namespace PluginCCS {
             OnPlayerMove_LookAtCoords(p);
             OnPlayerMove_CoordChanged(p, next);
         }
+        static void OnPlayerMove_LookAtCoords(Player p) {
+            ScriptData scriptData = GetScriptData(p); if (scriptData == null) { return; }
+            if (scriptData.stareCoords != null) {
+                ScriptRunner.LookAtCoords(p, (Vec3S32)scriptData.stareCoords);
+            }
+        }
         static void OnPlayerMove_CoordChanged(Player p, Position next) {
             ScriptData data = GetScriptData(p);
             if (data.coordChangedEvents == null) return;
-            Sevent sevent = data.coordChangedEvents.sync;
-            if (sevent == null || sevent.level != p.level) return;
 
             Vec3S32 newCoords = next.FeetBlockCoords;
             if (data.coordChangedEvents.data is Vec3S32 && (Vec3S32)data.coordChangedEvents.data == newCoords) {
@@ -1002,16 +1006,14 @@ namespace PluginCCS {
             }
             data.coordChangedEvents.data = newCoords;
 
-            bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async; //Actually always sync for now...
-            ScriptRunner.PerformScriptOnNewThread(
-                p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable, sevent.GetCommandData(next.FeetBlockCoords)
-                );
+            DoCoordChanged(p, data.coordChangedEvents.sync, next.FeetBlockCoords);
+            DoCoordChanged(p, data.coordChangedEvents.async, next.FeetBlockCoords);
         }
-        static void OnPlayerMove_LookAtCoords(Player p) {
-            ScriptData scriptData = GetScriptData(p); if (scriptData == null) { return; }
-            if (scriptData.stareCoords != null) {
-                ScriptRunner.LookAtCoords(p, (Vec3S32)scriptData.stareCoords);
-            }
+        static void DoCoordChanged(Player p, Sevent sevent, Vec3S32 coords) {
+            if (sevent == null || sevent.level != p.level) return;
+            bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async;
+            ScriptRunner.PerformScriptOnNewThread(p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable,
+                sevent.GetCommandData(coords));
         }
 
         static void OnPlayerClick
@@ -5097,9 +5099,12 @@ namespace PluginCCS {
             public override Cat cat { get { return Cat.Player_Events; } }
             public override string[] documentation { get { return new string[] {
                 "sync register [#label]",
+                "[async or sync] register [#label]",
                 "    Registers a label that will be called whenever the player's block coordinates change.",
                 "    The coord that the player has changed to will be passed to MBCoords, MBX, MBY, MBZ.",
-                "coordchangedevent sync unregister",
+                "    async means the label can be ran again before the previous event is finished running.",
+                "    You can use a different label for both async or sync and they will both be called.",
+                "coordchangedevent [async or sync] unregister",
                 "    Unregisteres the previously registered [label].",
                 "    ---",
                 "    IMPORTANT: Only one label may be registered at a time",
@@ -5108,7 +5113,7 @@ namespace PluginCCS {
 
             public override string name { get { return "coordchangedevent"; } }
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.coordChangedEvents; }
-            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Sync; } }
+            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Both; } }
         }
         public class Error : ScriptAction {
             public override Cat cat { get { return Cat.Basic; } }
