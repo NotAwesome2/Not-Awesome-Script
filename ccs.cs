@@ -1035,38 +1035,39 @@ namespace PluginCCS {
             if (!data.clickEvents.active) { return; }
 
             Vec3S32 coords = new Vec3S32(x, y, z);
-            ClickInfo clickInfo = new ClickInfo(button, action, yaw, pitch, entity, x, y, z, face);
 
-            DoClick(p, data.clickEvents.sync, coords, clickInfo);
-            DoClick(p, data.clickEvents.async, coords, clickInfo);
+            TriggerContext ctx = new ClickContext(button, action, yaw, pitch, entity, x, y, z, face);
+
+            DoClick(p, data.clickEvents.sync, coords, ctx);
+            DoClick(p, data.clickEvents.async, coords, ctx);
         }
-        static void DoClick(Player p, Sevent sevent, Vec3S32 coords, ClickInfo clickInfo) {
+        static void DoClick(Player p, Sevent sevent, Vec3S32 coords, TriggerContext ctx) {
             if (sevent == null) { return; }
             bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async;
             ScriptRunner.PerformScriptOnNewThread(p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable,
                 sevent.GetCommandData(coords),
-                clickInfo);
+                ctx);
         }
 
 
         #region NotifyAction
-        static void OnNotifyAction(Player p, NotifyActionType action, short value) { HandleNotifyAction(p, action, value, 0, 0, 0); }
-        static void OnNotifyPositionAction(Player p, NotifyActionType action, ushort x, ushort y, ushort z) { HandleNotifyAction(p, action, 0, x, y, z); }
-        static void HandleNotifyAction(Player p, NotifyActionType action, short value, ushort x, ushort y, ushort z) {
+        static void OnNotifyAction(Player p, NotifyActionType type, short value) { HandleNotifyAction(p, type, value, 0, 0, 0); }
+        static void OnNotifyPositionAction(Player p, NotifyActionType type, ushort x, ushort y, ushort z) { HandleNotifyAction(p, type, 0, x, y, z); }
+        static void HandleNotifyAction(Player p, NotifyActionType type, short value, int x, int y, int z) {
             ScriptData data = GetScriptData(p);
-            if (!data.notifyActionEvents.active) { return; }
-            DoNotifyAction(p, data.notifyActionEvents.sync);
-            DoNotifyAction(p, data.notifyActionEvents.async);
+            if (!data.clientActionEvents.active) { return; }
+
+            TriggerContext ctx = new ClientActionContext(type, value, x, y, z);
+            DoNotifyAction(p, data.clientActionEvents.sync, ctx);
+            DoNotifyAction(p, data.clientActionEvents.async, ctx);
         }
-        static void DoNotifyAction(Player p, Sevent sevent) {
+        static void DoNotifyAction(Player p, Sevent sevent, TriggerContext ctx) {
             if (sevent == null) { return; }
             bool repeatable = sevent.threadingType == Sevent.ThreadingType.Async;
-            throw new NotImplementedException();
-            //TODO: Pass relevant data to script (make clickinfo more generic, maybe?)
-            //TODO: Add actual NotifyAction script Action
-            //ScriptRunner.PerformScriptOnNewThread(
-            //    p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable,
-            //    sevent.GetCommandData(p.Pos.FeetBlockCoords));
+
+            ScriptRunner.PerformScriptOnNewThread(
+                p, p.level, sevent.scriptName, sevent.scriptLabel, sevent.perms, repeatable,
+                sevent.GetCommandData(p.Pos.FeetBlockCoords), ctx);
         }
         #endregion
     }
@@ -1870,18 +1871,18 @@ namespace PluginCCS {
         /// <summary>
         /// Returns a new script runner to run on the given level, getting a script based on the given script name.
         /// </summary>
-        public static ScriptRunner Create(Player p, Level level, string scriptName, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, ClickInfo clickInfo = null) {
+        public static ScriptRunner Create(Player p, Level level, string scriptName, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, TriggerContext ctx = null) {
 
             Script script = Script.Get(p, scriptName);
             if (script == null) return null;
 
-            return Create(p, level, script, perms, data, repeatable, thisBool, runArgs, clickInfo);
+            return Create(p, level, script, perms, data, repeatable, thisBool, runArgs, ctx);
         }
 
         /// <summary>
         /// Returns a new script runner to run on the given level using the given script.
         /// </summary>
-        public static ScriptRunner Create(Player p, Level level, Script script, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, ClickInfo clickInfo = null) {
+        public static ScriptRunner Create(Player p, Level level, Script script, RunnerPerms perms, CommandData data, bool repeatable, string thisBool, string[] runArgs, TriggerContext ctx = null) {
             ScriptRunner runner = new ScriptRunner();
 
             runner.script = script;
@@ -1894,7 +1895,7 @@ namespace PluginCCS {
             runner.repeatable = repeatable;
             runner.thisBool = thisBool;
             runner.runArgs = runArgs;
-            runner.clickInfo = clickInfo;
+            runner.ctx = ctx;
             return runner;
         }
 
@@ -2076,7 +2077,7 @@ namespace PluginCCS {
         public readonly object delayThread = new object();
 
         public CommandData cmdData;
-        public ClickInfo clickInfo = null;
+        public TriggerContext ctx = null;
 
         public int actionIndex;
         public List<int> comebackToIndex = new List<int>();
@@ -2325,7 +2326,7 @@ namespace PluginCCS {
         /// When the level this script runs in is security-critical,
         /// you must cache the level you check permissions for and pass it to this method rather than using p.level
         /// </summary>
-        public static void PerformScript(Player p, Level level, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
+        public static void PerformScript(Player p, Level level, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, TriggerContext ctx = null) {
             //pass in string arguments after label saparated by | characters
             string[] runArgs = startLabel.Split('|');
             startLabel = runArgs[0];
@@ -2342,7 +2343,7 @@ namespace PluginCCS {
             }
 
             try {
-                ScriptRunner scriptRunner = Create(p, level, scriptName, perms, data, repeatable, thisBool, runArgs, clickInfo);
+                ScriptRunner scriptRunner = Create(p, level, scriptName, perms, data, repeatable, thisBool, runArgs, ctx);
                 if (scriptRunner != null) {
                     scriptRunner.Run(startLabel);
                 }
@@ -2350,11 +2351,11 @@ namespace PluginCCS {
                 if (!repeatable) p.Extras[thisBool] = false;
             }
         }
-        public static void PerformScriptOnNewThread(Player p, Level level, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, ClickInfo clickInfo = null) {
+        public static void PerformScriptOnNewThread(Player p, Level level, string scriptName, string startLabel, RunnerPerms perms, bool repeatable, CommandData data, TriggerContext ctx = null) {
             Thread thread = new Thread(
                     () => {
                         try {
-                            PerformScript(p, level, scriptName, startLabel, perms, repeatable, data, clickInfo);
+                            PerformScript(p, level, scriptName, startLabel, perms, repeatable, data, ctx);
                         } catch (Exception ex) {
                             Logger.LogError(ex);
                             p.Message("&WAn error occurred: {0}", ex.Message);
@@ -2702,14 +2703,9 @@ namespace PluginCCS {
             }
         fuckyou:
 
-            if (clickInfo != null) {
-                const string clickDataName = "click.";
-                if (stringName.CaselessStarts(clickDataName) && stringName.Length > clickDataName.Length) {
-                    string clickDataField = stringName.Substring(clickDataName.Length);
-                    string got = clickInfo.GetInfo(clickDataField);
-                    if (got == null) { Error("There is no click field \"{0}\"", clickDataField); return ""; }
-                    return got;
-                }
+            if (ctx != null) {
+                string got = ctx.GetValue(this, stringName);
+                if (got != null) return got;
             }
 
             ReadOnlyPackages.ReadOnlyPackage rop = ReadOnlyPackages.GetReadOnlyPackage(this, stringName);
@@ -5044,7 +5040,7 @@ namespace PluginCCS {
                 "    async means the label can be ran again before the previous event is finished running.",
                 "    You can use a different label for both async or sync and they will both be called.",
                 "    Only works when map buildable and deletable are OFF.",
-                "    To get information about the player click, see the Click Label section.",
+                "    To get information about the player click, see the ClickEvent Packages section.",
                 "clickevent [async or sync] unregister",
                 "    Unregisteres the previously registered [label] for async or sync.",
                 "    ---",
@@ -5137,6 +5133,25 @@ namespace PluginCCS {
 
             public override string name { get { return "coordchangedevent"; } }
             protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.coordChangedEvents; }
+            public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Both; } }
+        }
+        public class ClientActionEvent : Event {
+            public override Cat cat { get { return Cat.Player_Events; } }
+            public override string[] documentation { get { return new string[] {
+                "[async or sync] register [#label]",
+                "    Registers a label that will be called whenever the player performs various clientside actions.",
+                "    async means the label can be ran again before the previous event is finished running.",
+                "    You can use a different label for both async or sync and they will both be called.",
+                "    To get information about the action, see the ClientActionEvent Packages section.",
+                "clientactionevent [async or sync] unregister",
+                "    Unregisteres the previously registered [label].",
+                "    ---",
+                "    IMPORTANT: Only one label may be registered at a time",
+                "    Repeating the Action will simply replace whatever label may have been registered before.",
+            }; } }
+
+            public override string name { get { return "clientactionevent"; } }
+            protected override SevGroup GetSevGroup(ScriptRunner run) { return run.scriptData.clientActionEvents; }
             public override Sevent.ThreadingType allowedThreadingTypes { get { return Sevent.ThreadingType.Both; } }
         }
         public class Error : ScriptAction {
@@ -5853,7 +5868,7 @@ namespace PluginCCS {
             }
         }
         public class ClickSection : Section {
-            public override string Name { get { return "Click Label"; } }
+            public override string Name { get { return "ClickEvent packages"; } }
 
             static string[] body = new string[] {
                 "When a script is ran from clickevent,",
@@ -5872,6 +5887,48 @@ namespace PluginCCS {
                 "    click.face",
                 "        The side of the block the player clicked. This can have the value of:",
                 "        None, AwayX, TowardsX, AwayY, TowardsY, AwayZ, or TowardsZ",
+            };
+
+            public override List<string> Body() {
+                return body.ToList();
+            }
+        }
+        public class ClientActionSection : Section {
+            public override string Name { get { return "ClientActionEvent packages"; } }
+
+            static string[] body = new string[] {
+                "When a script is ran from clientactionevent,",
+                "there is a special group of packages that give you information about the action.",
+                "    clientaction.type has the following possible values:",
+                "        BlockListSelected",
+                "        BlockListToggled",
+                "        LevelSaved",
+                "        Respawned",
+                "        SpawnUpdated",
+                "        TexturePackChanged",
+                "        TexturePromptResponded",
+                "        ThirdPersonChanged",
+                "    clientaction.value",
+                "        When applicable, contains data related to the action. For example, the ID of the block that was selected.",
+                "    clientaction.coords",
+                "        When applicable, contains the block coordinates of the action.",
+                "    clientaction.x",
+                "    clientaction.y",
+                "    clientaction.z",
+                //We don't actually get anything other than block coords here
+                //"        Same as above, but split into individual axes.",
+                //"    clientaction.coordsprecise",
+                //"        When applicable, contains the precise coordinates of the action (integer 32-per block, like for /tpp).",
+                //"    clientaction.pX",
+                //"    clientaction.pY",
+                //"    clientaction.pZ",
+                //"        Same as above, but split into individual axes.",
+                //"    clientaction.coordsdecimal",
+                //"        When applicable, contains the block coordinates of the action (decimal values, like for /tempbot add).",
+                //"    clientaction.dX",
+                //"    clientaction.dY",
+                //"    clientaction.dZ",
+                //"        Same as above, but split into individual axes.",
             };
 
             public override List<string> Body() {
@@ -6012,14 +6069,73 @@ namespace PluginCCS {
 
         public object data = null;
     }
-    public class ClickInfo {
+
+    /// <summary>
+    /// Context passed to the script runner about how it was triggered (e.g. via clickevent or clientactionevent)
+    /// </summary>
+    public abstract class TriggerContext {
+        protected abstract string FieldPrefix { get; }
+        /// <summary>
+        /// Returns null if the stringName is not affiliated with this context
+        /// </summary>
+        public string GetValue(ScriptRunner run, string stringName) {
+            string prefix = FieldPrefix;
+            if (!(stringName.CaselessStarts(prefix) && stringName.Length > prefix.Length)) { return null; }
+
+            string field = stringName.Substring(prefix.Length);
+            string value = GetField(field.ToLower());
+            if (value == null) { run.Error("There is no {0} field \"{1}\"", prefix.Substring(0, prefix.Length-1), field); return null; }
+            return value;
+        }
+        protected abstract string GetField(string field);
+    }
+    public class ClientActionContext : TriggerContext {
+        protected override string FieldPrefix { get { return "clientaction."; } }
+
+        public readonly NotifyActionType type;
+        public readonly short value;
+        public readonly int x, y, z;
+        public ClientActionContext(NotifyActionType type, short value, int x, int y, int z) {
+            this.type = type;
+            this.value = value;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+        protected override string GetField(string field) {
+            if (field == "type") { return type.ToString(); }
+            if (field == "value") { return value.ToString(); }
+
+            Vec3S32 blockCoords = new Vec3S32(x, y, z);
+            if (field == "coords")  { return blockCoords.X + " " + blockCoords.Y + " " + blockCoords.Z; }
+            if (field == "x") { return blockCoords.X.ToString(); }
+            if (field == "y") { return blockCoords.Y.ToString(); }
+            if (field == "z") { return blockCoords.Z.ToString(); }
+
+            //x y and z are block coords. Oops.
+            //if (field == "coordsprecise") { return x + " " + y + " " + z; }
+            //if (field == "px") { return x.ToString(); }
+            //if (field == "py") { return y.ToString(); }
+            //if (field == "pz") { return z.ToString(); }
+            //
+            //Vec3F32 blockCoordsDecimal = new Vec3F32(x / 32f, y / 32f, z / 32f);
+            //if (field == "coordsdecimal")  { return blockCoordsDecimal.X + " " + blockCoordsDecimal.Y + " " + blockCoordsDecimal.Z; }
+            //if (field == "dx") { return blockCoords.X.ToString(); }
+            //if (field == "dy") { return blockCoords.Y.ToString(); }
+            //if (field == "dz") { return blockCoords.Z.ToString(); }
+            return null;
+        }
+    }
+    public class ClickContext : TriggerContext {
+        protected override string FieldPrefix { get { return "click."; } }
+
         public readonly MouseButton button;
         public readonly MouseAction action;
         public readonly ushort x, y, z, yaw, pitch;
         public readonly byte entity;
         public readonly TargetBlockFace face;
 
-        public ClickInfo(
+        public ClickContext(
         MouseButton button, MouseAction action,
         ushort yaw, ushort pitch,
         byte entity, ushort x, ushort y, ushort z,
@@ -6037,8 +6153,8 @@ namespace PluginCCS {
         }
         const double packed2Rad = (2 * Math.PI) / 65536.0;
         const double rad2Deg = 180 / Math.PI;
-        public string GetInfo(string field) {
-            field = field.ToLower();
+
+        protected override string GetField(string field) {
             if (field == "button") { return button.ToString(); }
             //if (field == "action") { return action.ToString(); } //Useless as action is always same
             if (field == "coords") { return x + " " + y + " " + z; }
@@ -6164,7 +6280,7 @@ namespace PluginCCS {
         public SevGroup chatEvents = new SevGroup();
         public SevGroup zoneChangedEvents = new SevGroup();
         public SevGroup coordChangedEvents = new SevGroup();
-        public SevGroup notifyActionEvents = new SevGroup();
+        public SevGroup clientActionEvents = new SevGroup();
 
 
         public string prevModel = null;
@@ -6265,6 +6381,7 @@ namespace PluginCCS {
             debuggingDelay = 0;
 
             clickEvents.Reset();
+            clientActionEvents.Reset();
             chatEvents.Reset();
             zoneChangedEvents.Reset();
             coordChangedEvents.Reset();
