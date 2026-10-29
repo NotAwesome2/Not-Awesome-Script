@@ -2826,6 +2826,7 @@ namespace PluginCCS {
             World         = 1 <<  9,
             Player_Events = 1 << 10,
             Plugins       = 1 << 11,
+            String        = 1 << 12,
         }
 
         public static Dictionary<string, ScriptAction> Dic = new Dictionary<string, ScriptAction>();
@@ -4974,6 +4975,337 @@ namespace PluginCCS {
                 double y = -Math.Sin(pitch);
                 double z = -Math.Cos(yaw) * Math.Cos(pitch);
                 return new Vec3F32((float)x, (float)y, (float)z);
+            }
+        }
+        public class SetStrIndexOf : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Finds the first zero-based index instance of the string in the package and sets that to [package].IndexOf. If none is found, it's set to -1.",
+                "    For example:",
+                "        set someString abc zbc",
+                "        setstrindexof someString bc",
+                "        someString.IndexOf = 1",
+            }; } }
+
+            public override string name { get { return "setstrindexof"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                run.SetString(package + ".IndexOf", str.IndexOf(substr).ToString());
+            }
+        }
+        public class SetStrLastIndexOf : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Finds the last zero-based index instance of the string in the package and sets that to [package].IndexOf. If none is found, it's set to -1.",
+                "    For example:",
+                "        set someString abc zbc",
+                "        setstrlastindexof someString bc",
+                "        someString.IndexOf = 5",
+            }; } }
+
+            public override string name { get { return "setstrlastindexof"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                run.SetString(package + ".IndexOf", str.LastIndexOf(substr).ToString());
+            }
+        }
+        public class SetStrRemove : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Removes the first instance of [string] from [package]. If [string] is not contained in [package], nothing happens.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrremove someString day",
+                "        someString = \"Every thing\"",
+            }; } }
+
+            public override string name { get { return "setstrremove"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                if (run.cmdArgs == "") { return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+                int indexOf = str.IndexOf(substr);
+                if (indexOf < 0) { return; }
+
+                run.SetString(package, str.Remove(indexOf, substr.Length));
+            }
+        }
+        public class SetStrStartsWith : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Sets [package].StartsWith to true [package] starts with [string], otherwise sets it to false.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrstartswith someString Every",
+                "        someString.StartsWith = \"true\"",
+            }; } }
+
+            public override string name { get { return "setstrstartswith"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                if (str.StartsWith(substr)) {
+                    run.SetString(package + ".StartsWith", "true");
+                } else {
+                    run.SetString(package + ".StartsWith", "false");
+                }
+            }
+        }
+        public class SetStrEndsWith : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Sets [package].EndsWith to true [package] starts with [string], otherwise sets it to false.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrstartswith someString thing",
+                "        someString.EndsWith = \"true\"",
+            }; } }
+
+            public override string name { get { return "setstrendswith"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = run.cmdArgs;
+
+                if (str.EndsWith(substr)) {
+                    run.SetString(package + ".EndsWith", "true");
+                } else {
+                    run.SetString(package + ".EndsWith", "false");
+                }
+            }
+        }
+        public class SetStrUpper : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    Sets [package] to uppercase.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrupper someString",
+                "        someString = \"EVERYDAY THING\"",
+            }; } }
+
+            public override string name { get { return "setstrupper"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+
+                run.SetString(package, str.ToUpperInvariant());
+            }
+        }
+        public class SetStrLower : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    Sets [package] to lowercase.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrupper someString",
+                "        someString = \"everyday thing\"",
+            }; } }
+
+            public override string name { get { return "setstrlower"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+
+                run.SetString(package, str.ToLowerInvariant());
+            }
+        }
+        public class SetStrInsert : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [start] [string]",
+                "    Inserts [string] in [package] at the zero-based index [start].",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrinsert someString 3 WOW",
+                "        someString = \"EveWOWryday thing\"",
+            }; } }
+
+            public override string name { get { return "setstrinsert"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string[] argBits = run.cmdArgs.SplitSpaces();
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string substr = "";
+                if (argBits.Length > 1) {
+                    substr = run.cmdArgs.Remove(0, argBits[0].Length + 1); // Not including the index
+                }
+                
+                int start;
+                if (!NumberParser.TryParseInt(argBits[0], out start)) { run.Error("setstrinsert must receive an integer as the first input, got \"{0}\" instead.", argBits[0]); return; }
+                if (start < 0) { run.Error("setstrinsert must receive a non-negative index, got {0} instead.", start.ToString()); return; }
+                if (start > str.Length) { run.Error("setstrinsert must receive an index not bigger than the package's length ({0}), got {1} instead.", str.Length.ToString(), start.ToString()); return; }
+
+                run.SetString(package, str.Insert(start, substr));
+            }
+        }
+        public class SetStrSubstring : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [start] <length>",
+                "    Gets the substring of [package] starting at the zero-based index [start] and going until the end or until a desired <length> and sets that to [package].Substring",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrsubstring someString 5 7",
+                "        someString.Substring = \"day thi\"",
+            }; } }
+
+            public override string name { get { return "setstrsubstring"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string[] argBits = run.cmdArgs.SplitSpaces();
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                
+                int start;
+                if (!NumberParser.TryParseInt(argBits[0], out start)) { run.Error("setstrsubstring must receive an integer as the first input, got \"{0}\" instead.", argBits[0]); return; }
+                if (start < 0) { run.Error("setstrsubstring must receive a non-negative index, got {0} instead.", start.ToString()); return; }
+                if (start > str.Length) { run.Error("setstrsubstring must receive an index not bigger than the package's length ({0}), got {1} instead.", str.Length.ToString(), start.ToString()); return; }
+
+                if (argBits.Length == 1) {
+                    run.SetString(package + ".Substring", str.Substring(start));
+                } else {
+                    int length;
+                    if (!NumberParser.TryParseInt(argBits[1], out length)) { run.Error("setstrsubstring must receive an integer as the second input, got \"{0}\" instead.", argBits[1]); return; }
+                    if (length < 0) { run.Error("setstrsubstring must receive a non-negative length, got {0} instead.", length.ToString()); return; }
+                    if (length > str.Length - start) { run.Error("setstrsubstring must receive an index not bigger than the package's remaining length ({0}), got {1} instead.", (str.Length - start).ToString(), length.ToString()); return; }
+                    
+                    run.SetString(package + ".Substring", str.Substring(start, length));
+                }
+            }
+        }
+        public class SetStrReverse : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    Reverses [package].",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrreverse someString",
+                "        someString = \"gniht yadyrevE\"",
+            }; } }
+
+            public override string name { get { return "setstrreverse"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                
+                char[] charArray = str.ToCharArray();
+                Array.Reverse(charArray);
+
+                run.SetString(package, new string(charArray));
+            }
+        }
+        public class SetStrBefore : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Gets the substring of [package], starting from the beginning and ending at the first instance [string], not including [string], and sets that to [package].Before.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrbefore someString day",
+                "        someString.Before = \"Every\"",
+            }; } }
+
+            public override string name { get { return "setstrbefore"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string end = run.cmdArgs;
+                int index = str.IndexOf(end);
+
+                if (index == -1) { run.Error("setstrbefore requires that the delimiter is part of the string"); return; }
+
+                run.SetString(package + ".Before", str.Substring(0, index));
+            }
+        }
+        public class SetStrAfter : ScriptAction {
+            public override Cat cat { get { return Cat.Packages | Cat.String; } }
+            public override string[] documentation { get { return new string[] {
+                "[package] [string]",
+                "    Gets the substring of [package], starting from the first instance of [string], not including [string], going all the way to the end, and sets that to [package].After.",
+                "    For example:",
+                "        set someString Everyday thing",
+                "        setstrafter someString day",
+                "        someString.After = \" thing\"",
+            }; } }
+
+            public override string name { get { return "setstrafter"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.cmdArgs == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                string begin = run.cmdArgs;
+                int index = str.IndexOf(begin);
+
+                if (index == -1) { run.Error("setstrafter requires that the delimiter is part of the string"); return; }
+
+                run.SetString(package + ".After", str.Substring(index + begin.Length));
+            }
+        }
+        public class SetIsNumber : ScriptAction {
+            public override Cat cat { get { return Cat.Packages; } }
+            public override string[] documentation { get { return new string[] {
+                "[package]",
+                "    If [package] is a number, set [package].IsNumber to true, otherwise set it to false.",
+            }; } }
+
+            public override string name { get { return "setisnumber"; } }
+
+            public override void Behavior(ScriptRunner run) {
+                if (run.args == "") { run.Error("Not enough arguments for {0}", name); return; }
+
+                string package = run.cmdName;
+                string str = run.GetString(package);
+                double reallyUselessDoubleThatJustExistsToNotCauseErrors;
+                
+                if (NumberParser.TryParseDouble(str, out reallyUselessDoubleThatJustExistsToNotCauseErrors)) {
+                    run.SetString(package + ".IsNumber", "true");
+                } else {
+                    run.SetString(package + ".IsNumber", "false");
+                }
             }
         }
         public abstract class Event : ScriptAction {
