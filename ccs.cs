@@ -6884,6 +6884,7 @@ namespace PluginCCS {
                 return;
             }
             hotkey.Undefine(p);
+            hotkeys.Remove(hotkey);
         }
 
         public void UndefineAll() {
